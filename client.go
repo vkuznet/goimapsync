@@ -233,11 +233,9 @@ func Expunge(c *client.Client, match string) {
 	items := []imap.FetchItem{imap.FetchFlags, imap.FetchUid, imap.FetchEnvelope}
 	done := make(chan error, 1)
 	go func() {
-		//         done <- c.Fetch(seqset, []imap.FetchItem{imap.FetchEnvelope}, messages)
 		done <- c.Fetch(seqset, items, messages)
 	}()
 
-	log.Println("IMAP messages:")
 	seqNum := uint32(1)
 	found := false
 	for msg := range messages {
@@ -272,8 +270,8 @@ func Expunge(c *client.Client, match string) {
 }
 
 // helper function to sync give mail list on IMAP servers
-func syncMails(cmap map[string]*client.Client, mlist []Message) {
-	for name, _ := range cmap {
+func syncMails(cmap map[string]*client.Client, mlist []Message, dryRun bool) {
+	for name, client := range cmap {
 		log.Println("### Perform sync", name)
 		// now we loop over messages which are not present in local list
 		// and expunge them from IMAP
@@ -282,13 +280,16 @@ func syncMails(cmap map[string]*client.Client, mlist []Message) {
 				if Config.Verbose > 0 {
 					log.Printf("expunge: %s\n", m.String())
 				}
+				if !dryRun {
+					Expunge(client, m.MessageId)
+				}
 			}
 		}
 	}
 }
 
 // Sync provides sync between local maildir and IMAP servers
-func Sync(cmap map[string]*client.Client) {
+func Sync(cmap map[string]*client.Client, dryRun bool) {
 
 	// get local maildir snapshot
 	mdict := ReadMaildir()
@@ -307,12 +308,14 @@ func Sync(cmap map[string]*client.Client) {
 			}
 		}
 	}
-	syncMails(cmap, mlist)
+	syncMails(cmap, mlist, dryRun)
 }
 
 func main() {
 	var config string
 	flag.StringVar(&config, "config", "config.json", "config JSON file")
+	var dryRun bool
+	flag.BoolVar(&dryRun, "dryRun", false, "perform dry-run")
 	flag.Parse()
 	err := ParseConfig(config)
 	if err != nil {
@@ -329,5 +332,5 @@ func main() {
 	cmap := connect()
 	defer logout(cmap)
 
-	Sync(cmap)
+	Sync(cmap, dryRun)
 }
