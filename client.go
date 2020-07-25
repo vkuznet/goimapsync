@@ -311,9 +311,27 @@ func Sync(cmap map[string]*client.Client, dryRun bool) {
 	syncMails(cmap, mlist, dryRun)
 }
 
+func defaultConfig() string {
+	var home, config string
+	for _, e := range os.Environ() {
+		pair := strings.Split(e, "=")
+		if pair[0] == "HOME" {
+			home = pair[1]
+			break
+		}
+	}
+	path := fmt.Sprintf("%s/.goimapsyncrc", home)
+	if info, err := os.Stat(path); err == nil {
+		if !info.IsDir() {
+			config = path
+		}
+	}
+	return config
+}
+
 func main() {
 	var config string
-	flag.StringVar(&config, "config", "config.json", "config JSON file")
+	flag.StringVar(&config, "config", defaultConfig(), "config JSON file")
 	var dryRun bool
 	flag.BoolVar(&dryRun, "dryRun", false, "perform dry-run")
 	flag.Parse()
