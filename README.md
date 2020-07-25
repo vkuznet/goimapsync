@@ -25,5 +25,5 @@ work in progress. Its logic is simple:
 - fetch IMAP content from your folder(s)
 - compare the two
 - update your IMAP server(s) based on your local Maildir state
-
-All of this functionality is implemented but I didn't yet enable final step.
+  - so far we only implemented how to delete mails on remote IMAP
+  if it is already deleted in local maildir.
