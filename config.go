@@ -6,10 +6,12 @@ package main
 //
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"log"
+	"os"
 )
 
 // Server structure keeps IMAP server's credentials
@@ -39,10 +41,26 @@ func (c *Configuration) String() string {
 
 // ParseConfig parse given config file
 func ParseConfig(configFile string) error {
-	data, err := ioutil.ReadFile(configFile)
-	if err != nil {
-		log.Printf("Unable to read: file %s, error %v\n", configFile, err)
-		return err
+	var data []byte
+	var err error
+	if configFile == "-" {
+		// read from stdin
+		scanner := bufio.NewScanner(os.Stdin)
+		var content string
+		for scanner.Scan() {
+			content = fmt.Sprintf("%s%s", content, scanner.Text())
+		}
+		data = []byte(content)
+		if err := scanner.Err(); err != nil {
+			log.Println("unable to read from stdin", err)
+			return err
+		}
+	} else {
+		data, err = ioutil.ReadFile(configFile)
+		if err != nil {
+			log.Printf("Unable to read: file %s, error %v\n", configFile, err)
+			return err
+		}
 	}
 	err = json.Unmarshal(data, &Config)
 	if err != nil {
