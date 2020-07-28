@@ -206,6 +206,9 @@ func ReadMaildir() map[string]Message {
 
 // helper function to get folder name for given IMAP server
 func getFolder(imapName, folder string) string {
+	if folder == "" {
+		return folder
+	}
 	for _, srv := range Config.Servers {
 		if srv.Name == imapName {
 			for _, f := range srv.Folders {
@@ -225,11 +228,12 @@ func getFolder(imapName, folder string) string {
 	return ""
 }
 
-// Junk will mark message on IMAP as junk
-func Junk(c *client.Client, imapName, match string, dryRun bool) {
+// Move message on IMAP to a given folder, if folder name is not given the mail
+// will be deleted
+func Move(c *client.Client, imapName, match, folderName string) {
 	// inbox folder
 	inboxFolder := getFolder(imapName, "inbox")
-	spamFolder := getFolder(imapName, "spam")
+	folder := getFolder(imapName, folderName)
 
 	// check if given match is existing file, if so we'll
 	// extract from it MatchedId
@@ -248,7 +252,9 @@ func Junk(c *client.Client, imapName, match string, dryRun bool) {
 	to := mbox.Messages
 	seqset := new(imap.SeqSet)
 	seqset.AddRange(from, to)
-	log.Println("Fetch from IMAP", from, to)
+	if Config.Verbose > 0 {
+		log.Println("Fetch from IMAP", from, to)
+	}
 
 	messages := make(chan *imap.Message, to)
 	items := []imap.FetchItem{imap.FetchFlags, imap.FetchUid, imap.FetchEnvelope}
@@ -260,10 +266,13 @@ func Junk(c *client.Client, imapName, match string, dryRun bool) {
 	seqNum := uint32(1)
 	found := false
 	for msg := range messages {
-		log.Println("* "+msg.Envelope.Subject+" MessageId ", msg.Envelope.MessageId)
+		if Config.Verbose > 1 {
+			log.Println("* "+msg.Envelope.Subject+" MessageId ", msg.Envelope.MessageId)
+		}
 		if msg.Envelope.MessageId == match {
-			log.Printf("Found match: %+v\n", seqNum)
-			log.Printf("UID: %v, Envelope: %+v, Flags: %+v\n", msg.Uid, msg.Envelope, msg.Flags)
+			if Config.Verbose > 0 {
+				log.Printf("Found match: seq:%v UID: %v, Envelope: %+v, Flags: %+v\n", seqNum, msg.Uid, msg.Envelope, msg.Flags)
+			}
 			found = true
 			break
 		}
@@ -273,7 +282,7 @@ func Junk(c *client.Client, imapName, match string, dryRun bool) {
 		// since we found a message we can delete it
 		seqset := new(imap.SeqSet)
 		seqset.AddNum(seqNum)
-		log.Println("junk message", match, seqNum, seqset, "will move to", spamFolder)
+		log.Printf("message: %s sequence: %v will move to '%s'", match, seqNum, folder)
 
 		// connect to given Spam folder
 		_, err := c.Select(inboxFolder, false)
@@ -287,89 +296,30 @@ func Junk(c *client.Client, imapName, match string, dryRun bool) {
 		if err := c.Store(seqset, item, flags, nil); err != nil {
 			log.Fatal(err)
 		}
-		// copy mail to spam folder
-		if err := c.Copy(seqset, spamFolder); err != nil {
-			log.Fatal(err)
-		}
-
-		if !dryRun {
-			// Then delete it in inbox folder
-			if err := c.Expunge(nil); err != nil {
+		// copy mail to folder
+		if folder != "" {
+			if err := c.Copy(seqset, folder); err != nil {
 				log.Fatal(err)
 			}
 		}
-	}
-}
-
-// Expunge will delete message on IMAP with given connected client and
-// given MessageId provided as match input parameter. Please note
-// match may be either MessageId or an email file name which we'll
-// scan to get MessageId
-func Expunge(c *client.Client, match string) {
-
-	// check if given match is existing file, if so we'll
-	// extract from it MatchedId
-	if _, err := os.Stat(match); err == nil {
-		match = getMessageId(match)
-	}
-
-	// Select INBOX
-	mbox, err := c.Select("INBOX", false)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	// Get messages from INBOX
-	from := uint32(1)
-	to := mbox.Messages
-	seqset := new(imap.SeqSet)
-	seqset.AddRange(from, to)
-	log.Println("Fetch from IMAP", from, to)
-
-	messages := make(chan *imap.Message, to)
-	items := []imap.FetchItem{imap.FetchFlags, imap.FetchUid, imap.FetchEnvelope}
-	done := make(chan error, 1)
-	go func() {
-		done <- c.Fetch(seqset, items, messages)
-	}()
-
-	seqNum := uint32(1)
-	found := false
-	for msg := range messages {
-		log.Println("* "+msg.Envelope.Subject+" MessageId ", msg.Envelope.MessageId)
-		if msg.Envelope.MessageId == match {
-			log.Printf("Found match: %+v\n", seqNum)
-			log.Printf("UID: %v, Envelope: %+v, Flags: %+v\n", msg.Uid, msg.Envelope, msg.Flags)
-			found = true
-			break
-		}
-		seqNum += 1
-	}
-	if found {
-		// since we found a message we can delete it
-		seqset := new(imap.SeqSet)
-		seqset.AddNum(seqNum)
-		log.Println("we need to delete", match, seqNum, seqset)
-
-		// First mark the message as deleted
-		item := imap.FormatFlagsOp(imap.AddFlags, true)
-		flags := []interface{}{imap.DeletedFlag}
+		// mark mail as deleted on IMAP server
+		flags = []interface{}{imap.DeletedFlag}
 		if err := c.Store(seqset, item, flags, nil); err != nil {
 			log.Fatal(err)
 		}
-
-		// Then delete it
+		// then delete it in inbox folder
 		if err := c.Expunge(nil); err != nil {
 			log.Fatal(err)
 		}
 	}
-
 }
 
 // helper function to sync give mail list on IMAP servers
 func syncMails(cmap map[string]*client.Client, mlist []Message, dryRun bool) {
 	for name, client := range cmap {
-		log.Println("### Perform sync", name)
+		if Config.Verbose > 0 {
+			log.Println("### Perform sync", name)
+		}
 		// now we loop over messages which are not present in local list
 		// and expunge them from IMAP
 		for _, m := range mlist {
@@ -378,7 +328,8 @@ func syncMails(cmap map[string]*client.Client, mlist []Message, dryRun bool) {
 					log.Printf("expunge: %s\n", m.String())
 				}
 				if !dryRun {
-					Expunge(client, m.MessageId)
+					// to delete message we'll call move with empty folder
+					Move(client, m.Imap, m.MessageId, "")
 				}
 			}
 		}
@@ -413,8 +364,10 @@ func main() {
 	flag.StringVar(&config, "config", os.Getenv("HOME")+"/.goimapsyncrc", "config JSON file")
 	var dryRun bool
 	flag.BoolVar(&dryRun, "dryRun", false, "perform dry-run")
-	var junk string
-	flag.StringVar(&junk, "junk", "", "junk mail file or messageid")
+	var mid string
+	flag.StringVar(&mid, "mid", "", "mail file or messageid to use")
+	var folder string
+	flag.StringVar(&folder, "folder", "", "folder folder to use")
 	flag.Parse()
 	err := ParseConfig(config)
 	if err != nil {
@@ -431,9 +384,10 @@ func main() {
 	cmap := connect()
 	defer logout(cmap)
 
-	if junk != "" {
+	// perform move action for given message id and IMAP folder
+	if folder != "" && mid != "" {
 		for name, c := range cmap {
-			Junk(c, name, junk, dryRun)
+			Move(c, name, mid, folder)
 		}
 		os.Exit(0)
 	}
