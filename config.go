@@ -16,12 +16,14 @@ import (
 
 // Server structure keeps IMAP server's credentials
 type Server struct {
-	Name      string   `json:"name"`      // name of IMAP server
-	Uri       string   `json:"uri"`       // IMAP URI
-	Username  string   `json:"username"`  // user name
-	Password  string   `json:"password"`  // user password
-	UseTls    bool     `json:"useTls"`    // use TLS connection
-	Mailboxes []string `json:"mailboxes"` // mailboxes to use on IMAP
+	Name     string   `json:"name"`     // name of IMAP server
+	Uri      string   `json:"uri"`      // IMAP URI
+	Username string   `json:"username"` // user name
+	Password string   `json:"password"` // user password
+	UseTls   bool     `json:"useTls"`   // use TLS connection
+	Inbox    string   `json:"inbox"`    // name of inbox, default INBOX
+	Spam     string   `json:"spam"`     // name of spam folder, default Spam
+	Folders  []string `json:"folders"`  // list of folder to use for syncig to IMAP
 }
 
 // Configuration stores DAS configuration parameters
@@ -69,8 +71,11 @@ func ParseConfig(configFile string) error {
 	}
 	// setup default (INBOX) mailbox to use
 	for _, srv := range Config.Servers {
-		if len(srv.Mailboxes) == 0 {
-			srv.Mailboxes = []string{"INBOX"}
+		if srv.Inbox == "" {
+			srv.Inbox = "INBOX"
+		}
+		if srv.Spam == "" {
+			srv.Spam = "Spam"
 		}
 	}
 	return nil
