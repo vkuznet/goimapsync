@@ -19,6 +19,9 @@ import (
 	"github.com/emersion/go-imap/client"
 )
 
+// imap folders
+var imapFolders map[string][]string
+
 // extract flags from given email file name
 func getFlags(fname string) []string {
 	// example of file name in our Inbox
@@ -204,18 +207,35 @@ func ReadMaildir() map[string]Message {
 	return mdict
 }
 
+func getFolders(c *client.Client, imapName string) []string {
+	// List mailboxes
+	mailboxes := make(chan *imap.MailboxInfo, 10)
+	done := make(chan error, 1)
+	go func() {
+		done <- c.List("", "*", mailboxes)
+	}()
+
+	var folders []string
+	for m := range mailboxes {
+		folders = append(folders, m.Name)
+	}
+
+	if err := <-done; err != nil {
+		log.Fatal(err)
+	}
+	return folders
+}
+
 // helper function to get folder name for given IMAP server
 func getFolder(imapName, folder string) string {
+	// if no folder is given, we'll immediately return
 	if folder == "" {
 		return folder
 	}
-	for _, srv := range Config.Servers {
-		if srv.Name == imapName {
-			for _, f := range srv.Folders {
-				if strings.ToLower(f) == strings.ToLower(folder) {
-					return f
-				}
-			}
+	folders := imapFolders[imapName]
+	for _, f := range folders {
+		if strings.ToLower(f) == strings.ToLower(folder) {
+			return f
 		}
 	}
 	// defaults
@@ -380,10 +400,21 @@ func main() {
 		log.SetFlags(log.LstdFlags)
 	}
 
+	// init imap folders map
+	imapFolders = make(map[string][]string)
+
 	// connect to our IMAP servers
 	cmap := connect()
 	defer logout(cmap)
 
+	for name, c := range cmap {
+		folders := getFolders(c, name)
+		imapFolders[name] = folders
+		if Config.Verbose > 0 {
+			log.Println("IMAP", name, folders)
+		}
+	}
+	os.Exit(0)
 	// perform move action for given message id and IMAP folder
 	if folder != "" && mid != "" {
 		for name, c := range cmap {
