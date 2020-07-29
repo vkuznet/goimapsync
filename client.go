@@ -245,6 +245,8 @@ func getFolder(imapName, folder string) string {
 	if strings.ToLower(folder) == "spam" {
 		return "Spam"
 	}
+	// at this point we should through an error
+	log.Fatalf("No folder '%s' found in imap '%s' folder list '%v'\n", folder, imapName, folders)
 	return ""
 }
 
