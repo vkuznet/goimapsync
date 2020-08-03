@@ -1,29 +1,51 @@
 ### goimapsync
-The `goimapsync` is a tool to sync local Maildir snapshot to IMAP servers of
-your choice. Why do we need this? Currently, with mutt email client
-we have different choices, e.g. a popular [offlimeimap](https://github.com/OfflineIMAP/offlineimap)
-python based tool. But it has high level of complexity, e.g. 
-it combines read and sync functions, it is Python (meaning it can
-be slow), it is not bullet proof, etc.
+The `goimapsync` is a tool to bi-directionally sync local Maildir snapshot to
+IMAP servers of your choice. It supports the following set of actions:
+- *sync* mails from local maildir to IMAP
+- *fetch* mails from IMAP to local maildir folder
+- *move* mail(s) on IMAP server to given folder and message id
+- *fullsync* mails from local maildir to IMAP
+It reproduces functionality of
+[fetchmail](https://www.fetchmail.info/),
+[procmail](https://userpages.umbc.edu/~ian/procmail.html)
+[offlineimap](https://github.com/OfflineIMAP/offlineimap), or
+similary tools and intent to work as main engine for
+[mutt](http://www.mutt.org/) Email client.
 
-Instead, I want something simpler and more reliable. For instance, we may use
-the following setup for mutt:
-- [fetchmail](https://www.fetchmail.info/)
-- [procmail](https://userpages.umbc.edu/~ian/procmail.html)
-- [neomutt](https://neomutt.org/)
+Even though these tools work great there are certain level of
+expertise is required to setup properly a working environment.
+The `goimapsync` is Go-based tool, with build-in concurrentcy
+which can compile into static executable and provide easy
+setup for mutt.
 
-Each tool is very well designed to do one task (K.I.S.S unix principle),
-the fetchmail fetches the mails from IMAP servers of your choice,
-the procmail redirects them to your Maildir, while (neo)mutt provide you
-terminal UI. What is missing here is a sync tool which will allow to
-sync your local Maildir setup back to IMAPs.
+### Configuration and setup
+To setup everything with mutt email client you only need to get
+a binary file and instruct mutt to use it. To build the code just
+use [Go-lang](https://golang.org/)::
+```
+# build the code
+git clone https://github.com/vkuznet/goimapsync
+cd goimapsync
+go build
+```
 
-This was the idea behind the `goimapsync`. The tool is based on
-[go-imap](github.com/emersion/go-imap) middleware, and so far is a
-work in progress. Its logic is simple:
-- fetch content of your folder(s) from local maildir
-- fetch IMAP content from your folder(s)
-- compare the two
-- update your IMAP server(s) based on your local Maildir state
-  - so far we only implemented how to delete mails on remote IMAP
-  if it is already deleted in local maildir.
+To run the code
+```
+# get help
+goimapsync -help
+
+# fetch mails from given IMAP folder
+goimapsync -config config.json -op=fetch -folder=MyFolder
+
+# sync mails form local maildir to IMAP
+goimapsync -config config.json -op=sync
+
+# perform full sync, i.e. first mails from INBOX and then sync local maildir
+goimapsync -config config.json -op=fullsync
+
+# the same operation with encrypted (gpg) config
+gpgp -d -o $HOME/.goimapsync.gpg | goimapsync -op=fullsync -config -
+
+# move given mail id in IMAP server to given folder
+goimapsync -config config.json -op=move -mid=123 -folder=MyFolder
+```

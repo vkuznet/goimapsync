@@ -25,9 +25,10 @@ type Server struct {
 
 // Configuration stores DAS configuration parameters
 type Configuration struct {
-	Servers []Server `json:"servers"` // list of IMAP server credentials
-	Maildir string   `json:"maildir"` // maildir directory
-	Verbose int      `json:"verbose"` // verbosity level
+	Servers     []Server `json:"servers"`     // list of IMAP server credentials
+	Maildir     string   `json:"maildir"`     // maildir directory
+	CommonInbox bool     `json:"commonInbox"` // use common inbox for all imap servers
+	Verbose     int      `json:"verbose"`     // verbosity level
 }
 
 // Config variable represents configuration object
