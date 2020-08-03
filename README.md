@@ -44,7 +44,7 @@ goimapsync -config config.json -op=sync
 goimapsync -config config.json -op=fullsync
 
 # the same operation with encrypted (gpg) config
-gpgp -d -o $HOME/.goimapsync.gpg | goimapsync -op=fullsync -config -
+gpg -d -o $HOME/.goimapsync.gpg | goimapsync -op=fullsync -config -
 
 # move given mail id in IMAP server to given folder
 goimapsync -config config.json -op=move -mid=123 -folder=MyFolder
