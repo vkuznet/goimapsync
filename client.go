@@ -479,6 +479,7 @@ func Move(c *client.Client, imapName, match, folderName string) {
 func Fetch(c *client.Client, imapName, folder string) {
 	start := time.Now()
 	defer timing("Fetch", start)
+	log.Printf("Fetch %s from %s\n", folder, imapName)
 	for _, m := range imapSnapshot(c, imapName, folder, true) {
 		if Config.Verbose > 0 {
 			log.Println("fetch", m.String())
@@ -525,6 +526,7 @@ func Sync(cmap map[string]*client.Client, dryRun bool) {
 	var mlist []Message
 	mch := make(chan []Message, len(cmap))
 	for name, c := range cmap {
+		log.Printf("Sync maildir and %s\n", name)
 		if !Config.CommonInbox { // if we use separate inbox folders for our imaps
 			mdict = readMaildir(name, "INBOX")
 		}
@@ -549,7 +551,11 @@ func Sync(cmap map[string]*client.Client, dryRun bool) {
 
 // helper function to report timing of given function
 func timing(name string, start time.Time) {
-	log.Printf("Function '%s' elapsed time: %v\n", name, time.Since(start))
+	if Config.Verbose > 0 {
+		log.Printf("Function '%s' elapsed time: %v\n", name, time.Since(start))
+	} else if name == "main" {
+		log.Printf("elapsed time: %v\n", time.Since(start))
+	}
 }
 
 func main() {
