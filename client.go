@@ -518,7 +518,7 @@ func syncMails(cmap map[string]*client.Client, mlist []Message, dryRun bool) {
 	defer timing("syncMails", start)
 	for name, client := range cmap {
 		if Config.Verbose > 0 {
-			log.Println("### Perform sync", name)
+			log.Println("Perform sync", name)
 		}
 		// now we loop over messages which are not present in local list
 		// and expunge them from IMAP
@@ -568,7 +568,7 @@ func Sync(cmap map[string]*client.Client, dryRun bool) {
 		}
 	}
 	if Config.Verbose > 0 {
-		log.Println("### we need to sync", len(mlist), "mails")
+		log.Println("We need to sync", len(mlist), "mails")
 	}
 	syncMails(cmap, mlist, dryRun)
 }
