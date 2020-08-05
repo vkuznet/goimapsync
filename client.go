@@ -130,7 +130,7 @@ func logout(cmap map[string]*client.Client) {
 
 // helper function which takes a snapshot of remote IMAP servers
 // and return list of messages
-func imapSnapshot(c *client.Client, imapName, folder string, writeContent bool) []Message {
+func imapSnapshot(c *client.Client, imapName, folder string, newMessages bool, writeContent bool) []Message {
 	start := time.Now()
 	defer timing("imapSnapshot", start)
 
@@ -141,24 +141,41 @@ func imapSnapshot(c *client.Client, imapName, folder string, writeContent bool) 
 		return []Message{}
 	}
 
-	// Get messages
-	from := uint32(1)
-	to := mbox.Messages
+	// get messages
 	seqset := new(imap.SeqSet)
-	seqset.AddRange(from, to)
-
-	messages := make(chan *imap.Message, to)
-	items := []imap.FetchItem{imap.FetchFlags, imap.FetchUid, imap.FetchEnvelope}
+	var nmsg uint32
+	if newMessages {
+		// get only new messages
+		criteria := imap.NewSearchCriteria()
+		criteria.WithoutFlags = []string{imap.SeenFlag}
+		ids, err := c.Search(criteria)
+		if err != nil {
+			log.Fatal(err)
+		}
+		if len(ids) > 0 {
+			seqset.AddNum(ids...)
+			nmsg = uint32(len(ids))
+			log.Printf("Found %d new message(s) in folder '%s' on '%s'\n", nmsg, folder, imapName)
+		} else {
+			log.Printf("No new messages in folder '%s' on '%s'\n", folder, imapName)
+			return []Message{}
+		}
+	} else {
+		// get all messages from mailbox
+		from := uint32(1)
+		to := mbox.Messages
+		seqset.AddRange(from, to)
+		nmsg = to
+	}
+	var mdict map[string]string
 	// section will be used only in writeContent
 	section := &imap.BodySectionName{}
-	var mdict map[string]string
-	firstWrite := false // check if we ever wrote to our folder before
+
+	messages := make(chan *imap.Message, nmsg)
+	items := []imap.FetchItem{imap.FetchFlags, imap.FetchEnvelope}
 	if writeContent {
 		mdict = readMaildir(imapName, folder)
-		if len(mdict) == 0 {
-			firstWrite = true // there is no mails in our folder
-		}
-		items = []imap.FetchItem{section.FetchItem(), imap.FetchFlags, imap.FetchUid, imap.FetchEnvelope}
+		items = []imap.FetchItem{section.FetchItem(), imap.FetchFlags, imap.FetchEnvelope}
 	}
 	done := make(chan error, 1)
 	go func() {
@@ -177,7 +194,7 @@ func imapSnapshot(c *client.Client, imapName, folder string, writeContent bool) 
 		sub := msg.Envelope.Subject
 		hid := md5hash(mid)
 		flags := msg.Flags
-		log.Printf("fetch %v out of %v from %s\n", seqNum, to, imapName)
+		log.Printf("fetch %v (hid %v, message id %v, flags %v) out of %v from %s\n", seqNum, hid, mid, flags, nmsg, imapName)
 		if writeContent {
 			r := msg.GetBody(section)
 			// check if our file has md5 hash init (it was already written before)
@@ -186,9 +203,7 @@ func imapSnapshot(c *client.Client, imapName, folder string, writeContent bool) 
 					log.Println("Mail with hash", hid, "already exists")
 				}
 			} else {
-				// if it is not our first write to folder and mail did not
-				// exists over there it means it is recent (new) mail
-				if !firstWrite {
+				if newMessages {
 					flags = append(flags, imap.RecentFlag)
 				}
 				wg.Add(1)
@@ -224,6 +239,9 @@ func readMaildir(imapName, folder string) map[string]string {
 	for _, d := range dirs {
 		fpath := fmt.Sprintf("%s/%s/%s", Config.Maildir, fdir, d)
 		os.MkdirAll(fpath, os.ModePerm)
+	}
+	if Config.Verbose > 0 {
+		log.Println("Read local mails from", fmt.Sprintf("%s/%s", Config.Maildir, fdir))
 	}
 
 	// create mail dict which we'll return upstream
@@ -267,10 +285,10 @@ func writeMail(imapName, folder, hid string, flags []string, r io.Reader, wg *sy
 		f = strings.ToLower(strings.Replace(f, "\\", "", -1))
 		if f == "seen" {
 			f = "S"
-		} else if f == "recent" || f == "new" {
+		} else if f == "recent" {
 			f = "N"
-		} else if f == "replied" || f == "answered" {
-			f = "R"
+		} else if f == "answered" {
+			f = "A"
 		} else if f == "junk" {
 			f = "J"
 		} else {
@@ -283,6 +301,9 @@ func writeMail(imapName, folder, hid string, flags []string, r io.Reader, wg *sy
 	}
 	// our file name will have format <tstamp.hid.hostname:2,flags> where hid is messageId hash
 	tstamp := time.Now().Unix()
+	if Config.Verbose > 0 {
+		log.Println("writeMail", tstamp, hid, flags, flag)
+	}
 	fname := fmt.Sprintf("%d.%s.%s:2,%s", tstamp, hid, hostname, flag)
 	if strings.Contains(flag, "N") {
 		fname = fmt.Sprintf("%d.%s.%s", tstamp, hid, hostname)
@@ -392,7 +413,11 @@ func MoveMessage(c *client.Client, imapName string, msg Message, folderName stri
 		log.Fatal(err)
 	}
 
-	log.Println("move %v to %s on %s\n", msg.MessageId, folder, imapName)
+	if folder == "" {
+		log.Printf("delete %v on %s\n", msg.MessageId, imapName)
+	} else {
+		log.Printf("move %v to '%s' on %s\n", msg.MessageId, folder, imapName)
+	}
 
 	// mark mail as seen in our inbox
 	item := imap.FormatFlagsOp(imap.AddFlags, true)
@@ -476,11 +501,11 @@ func Move(c *client.Client, imapName, match, folderName string) {
 }
 
 // Fetch content of given folder from IMAP into local maildir
-func Fetch(c *client.Client, imapName, folder string) {
+func Fetch(c *client.Client, imapName, folder string, newMessages bool) {
 	start := time.Now()
 	defer timing("Fetch", start)
 	log.Printf("Fetch %s from %s\n", folder, imapName)
-	for _, m := range imapSnapshot(c, imapName, folder, true) {
+	for _, m := range imapSnapshot(c, imapName, folder, newMessages, true) {
 		if Config.Verbose > 0 {
 			log.Println("fetch", m.String())
 		}
@@ -531,7 +556,7 @@ func Sync(cmap map[string]*client.Client, dryRun bool) {
 			mdict = readMaildir(name, "INBOX")
 		}
 		go func(cl *client.Client, n string) {
-			mch <- imapSnapshot(cl, n, "INBOX", false)
+			mch <- imapSnapshot(cl, n, "INBOX", false, false)
 		}(c, name)
 	}
 	// collect our message list
@@ -567,7 +592,7 @@ func main() {
 	var mid string
 	flag.StringVar(&mid, "mid", "", "mail file or messageid to use")
 	var folder string
-	flag.StringVar(&folder, "folder", "", "folder to use")
+	flag.StringVar(&folder, "folder", "INBOX", "folder to use")
 	var op string
 	flag.StringVar(&op, "op", "sync", "perform given operation")
 	var verbose int
@@ -575,12 +600,19 @@ func main() {
 	flag.Usage = func() {
 		fmt.Println("Usage: goimapsync [options]")
 		flag.PrintDefaults()
+		fmt.Println("Supported operations:")
+		fmt.Println("   fetch-new: to get list of new messages from specified IMAP folder")
+		fmt.Println("   fetch-all: to get list of all messages from specified IMAP folder")
+		fmt.Println("   sync     : to sync local maildir with IMAP server(s)")
+		fmt.Println("   fullsync : to fetch new messages and then sync local maildir with IMAP server(s)")
 		fmt.Println("Examples:")
-		fmt.Println("   # fetch mails from given IMAP folder")
-		fmt.Println("   goimapsync -config config.json -op=fetch -folder=MyFolder")
+		fmt.Println("   # fetch new messages from given IMAP folder")
+		fmt.Println("   goimapsync -config config.json -op=fetch-new -folder=MyFolder")
+		fmt.Println("   # fetch all messages from given IMAP folder")
+		fmt.Println("   goimapsync -config config.json -op=fetch-all -folder=MyFolder")
 		fmt.Println("   # sync mails form local maildir to IMAP")
 		fmt.Println("   goimapsync -config config.json -op=sync")
-		fmt.Println("   # perform full sync, i.e. fetch mails from INBOX and then sync")
+		fmt.Println("   # perform full sync, i.e. fetch new messages from INBOX and then sync")
 		fmt.Println("   goimapsync -config config.json -op=fullsync")
 		fmt.Println("   # the same operation with encrypted (gpg) config")
 		fmt.Println("   gpg -d -o - $HOME/.goimapsync.gpg | goimapsync -op=sync -config -")
@@ -609,6 +641,12 @@ func main() {
 	start := time.Now()
 	defer timing("main", start)
 
+	if Config.CommonInbox {
+		log.Printf("maildir: %s, use common inbox for all IMAP servers\n", Config.Maildir)
+	} else {
+		log.Printf("maildir: %s\n", Config.Maildir)
+	}
+
 	// init imap folders map
 	imapFolders = make(map[string][]string)
 	hostname, err = os.Hostname()
@@ -633,22 +671,27 @@ func main() {
 		} else {
 			log.Fatal("Move operation requires both folder and message id")
 		}
-	} else if op == "fetch" {
-		// fetch given folder content
+	} else if op == "fetch-new" {
+		// fetch new messages for given IMAP folder
 		for name, c := range cmap {
-			Fetch(c, name, folder)
+			Fetch(c, name, folder, true)
+		}
+	} else if op == "fetch-all" {
+		// fetch all messages (old and new) for given IMAP folder
+		for name, c := range cmap {
+			Fetch(c, name, folder, false)
 		}
 	} else if op == "sync" {
 		// sync emails between local maildir and IMAP server
 		Sync(cmap, dryRun)
 	} else if op == "fullsync" {
-		// fetch mails from our IMAP servers
+		// fetch new messages from Inbox folder of IMAP servers
 		for name, c := range cmap {
-			Fetch(c, name, "INBOX")
+			Fetch(c, name, "INBOX", true)
 		}
 		// sync emails from local maildir to IMAP server
 		Sync(cmap, dryRun)
 	} else {
-		log.Fatalf("Given operation '%s' is not supported\n", op)
+		log.Fatalf("Given operation '%s' is not supported, please use sync, fullsync, fetch-new, fetch-all\n", op)
 	}
 }
