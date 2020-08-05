@@ -603,6 +603,7 @@ func main() {
 		fmt.Println("Supported operations:")
 		fmt.Println("   fetch-new: to get list of new messages from specified IMAP folder")
 		fmt.Println("   fetch-all: to get list of all messages from specified IMAP folder")
+		fmt.Println("   move     : to move givem message on IMAP server, e.g. send to Spam")
 		fmt.Println("   sync     : to sync local maildir with IMAP server(s)")
 		fmt.Println("   fullsync : to fetch new messages and then sync local maildir with IMAP server(s)")
 		fmt.Println("Examples:")

@@ -1,10 +1,11 @@
 ### goimapsync
 The `goimapsync` is a tool to bi-directionally sync local Maildir snapshot to
 IMAP servers of your choice. It supports the following set of actions:
-- *sync* mails from local maildir to IMAP
-- *fetch* mails from IMAP to local maildir folder
-- *move* mail(s) on IMAP server to given folder and message id
-- *fullsync* mails from local maildir to IMAP
+- *sync*      to sync local maildir with IMAP server(s)
+- *fetch-new* to fetch new messages from IMAP
+- *fetch-all* to fetch all messages from IMAP
+- *move*      to move mail(s) on IMAP server to given folder and message id
+- *fullsync*  to fetch and sync mails between IMAP and local maildir
 It reproduces functionality of
 [fetchmail](https://www.fetchmail.info/),
 [procmail](https://userpages.umbc.edu/~ian/procmail.html)
