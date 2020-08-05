@@ -524,12 +524,11 @@ func syncMails(cmap map[string]*client.Client, mlist []Message, dryRun bool) {
 		// and expunge them from IMAP
 		for _, m := range mlist {
 			if m.Imap == name {
-				if Config.Verbose > 0 {
-					log.Println("expunge", m.String())
-				}
 				if !dryRun {
 					// to delete message we'll call move with empty folder
 					MoveMessage(client, m.Imap, m, "")
+				} else {
+					log.Println("dry-run expunge", m.String())
 				}
 			}
 		}
