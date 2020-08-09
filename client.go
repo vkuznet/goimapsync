@@ -45,7 +45,7 @@ type Message struct {
 	HashId    string   // message id md5 hash
 }
 
-// String funtion dumps Message info
+// String function dumps Message info
 func (m *Message) String() string {
 	return fmt.Sprintf("<Imap:%s SeqNum:%v HashId:%v Path:%s MessageId:%s Flags:%v Subject: %s>", m.Imap, m.SeqNumber, m.HashId, m.Path, m.MessageId, m.Flags, m.Subject)
 }
@@ -650,6 +650,9 @@ func main() {
 	// init imap folders map
 	imapFolders = make(map[string][]string)
 	hostname, err = os.Hostname()
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	// init our message db
 	mdb, err = InitDB()
@@ -668,7 +671,8 @@ func main() {
 			log.Println("IMAP", imapName, folders)
 		}
 	}
-	if op == "move" {
+	switch op {
+	case "move":
 		if folder != "" && mid != "" {
 			// perform move action for given message id and IMAP folder
 			for name, c := range cmap {
@@ -677,20 +681,20 @@ func main() {
 		} else {
 			log.Fatal("Move operation requires both folder and message id")
 		}
-	} else if op == "fetch-new" {
+	case "fetch-new":
 		// fetch new messages for given IMAP folder
 		for name, c := range cmap {
 			Fetch(c, name, folder, true)
 		}
-	} else if op == "fetch-all" {
+	case "fetch-all":
 		// fetch all messages (old and new) for given IMAP folder
 		for name, c := range cmap {
 			Fetch(c, name, folder, false)
 		}
-	} else if op == "sync" {
+	case "sync":
 		// sync emails between local maildir and IMAP server
 		Sync(cmap, dryRun)
-	} else {
+	default:
 		log.Fatalf("Given operation '%s' is not supported, please use sync, fetch-new, fetch-all\n", op)
 	}
 }
