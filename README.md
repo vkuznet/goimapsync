@@ -50,12 +50,53 @@ goimapsync -config config.json -op=fetch -folder=MyFolder
 # sync mails form local maildir to IMAP
 goimapsync -config config.json -op=sync
 
-# perform full sync, i.e. first mails from INBOX and then sync local maildir
-goimapsync -config config.json -op=fullsync
-
-# the same operation with encrypted (gpg) config
-gpg -d -o $HOME/.goimapsync.gpg | goimapsync -op=fullsync -config -
-
 # move given mail id in IMAP server to given folder
 goimapsync -config config.json -op=move -mid=123 -folder=MyFolder
+```
+
+### Configuration
+The configuration is rather trivial, please provide your configuration
+file using the following structure:
+```
+{
+    "servers": [
+        {
+            "name": "NameOfYourImapServer, e.g. gmail",
+            "URI":"imap.gmail.com:993",
+            "Username": "username@gmail.com",
+            "Password": "userpassword",
+            "useTls": true
+        },
+        {
+            "name": "NameOfYourImapServer, e.g. proton",
+            "URI":"127.0.0.1:1143",
+            "Username": "username@protonmail.com",
+            "Password": "hashstringOfTheProtonBridge",
+            "useTls": false
+        }
+    ],
+    "commonInbox": true,
+    "maildir": "/some/path/Mail/Test",
+    "verbose": 0
+}
+```
+Here, you can specify different IMAP servers, use or not common Inbox (if `commonInbox`
+is false the Inbox from individual IMAP servers will be kept separately), and
+`useTls` defines either to use or not TLS connection to your IMAP server.
+For ProtonMail we can use ProtonBridge on your machine and connect to it
+w/o TLS (it will encrypt your outgoing mails anyway).
+
+Next, if you want to encrypt your configuration, just use the following:
+```
+# define output file
+ofile=$HOME/.goimapsync.gpg
+# define your gpg key
+key=bla-bla-bla
+# define your input config file
+ifile=config.json
+# encrypt your config file
+gpg -o $ofile -e -r $key $ifile
+
+# perform sync operation using your encrypted config file
+gpg -d -o $HOME/.goimapsync.gpg | goimapsync -op=sync -config -
 ```
