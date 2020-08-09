@@ -494,7 +494,7 @@ func Move(c *client.Client, imapName, match, folderName string) {
 		}
 		if msg.Envelope.MessageId == match {
 			if Config.Verbose > 0 {
-				log.Printf("Found match: seq:%v Envelope: %+v Flags: %+v SeqNum: %v\n", seqNum, msg.Envelope, msg.Flags)
+				log.Printf("Found match: seq:%v Envelope: %+v Flags: %+v\n", seqNum, msg.Envelope, msg.Flags)
 			}
 			mid := msg.Envelope.MessageId
 			hid := md5hash(mid)
@@ -551,7 +551,7 @@ func Sync(cmap map[string]*client.Client, dryRun bool) {
 	if Config.CommonInbox {
 		mdict = readMaildir("", "INBOX")
 	} else {
-		for name, _ := range cmap {
+		for name := range cmap {
 			for k, v := range readMaildir(name, "INBOX") {
 				mdict[k] = v
 			}

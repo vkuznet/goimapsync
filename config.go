@@ -34,11 +34,6 @@ type Configuration struct {
 // Config variable represents configuration object
 var Config Configuration
 
-// String returns string representation of DAS Config
-func (c *Configuration) String() string {
-	return fmt.Sprintf("%+v\n", c)
-}
-
 // ParseConfig parse given config file
 func ParseConfig(configFile string) error {
 	var data []byte
