@@ -68,5 +68,10 @@ func ParseConfig(configFile string) error {
 	if Config.DBUri == "" {
 		Config.DBUri = fmt.Sprintf("sqlite3://%s/.goimapsync.db\n", Config.Maildir)
 	}
+	if Config.CommonInbox {
+		log.Printf("maildir: %s, use common inbox for all IMAP servers\n", Config.Maildir)
+	} else {
+		log.Printf("maildir: %s\n", Config.Maildir)
+	}
 	return nil
 }

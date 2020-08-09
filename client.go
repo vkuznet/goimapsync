@@ -594,7 +594,6 @@ func timing(name string, start time.Time) {
 }
 
 func main() {
-	// parse config structure
 	var config string
 	flag.StringVar(&config, "config", os.Getenv("HOME")+"/.goimapsyncrc", "config JSON file")
 	var dryRun bool
@@ -644,16 +643,9 @@ func main() {
 	} else {
 		log.SetFlags(log.LstdFlags)
 	}
-
 	// add timing profile
 	start := time.Now()
 	defer timing("main", start)
-
-	if Config.CommonInbox {
-		log.Printf("maildir: %s, use common inbox for all IMAP servers\n", Config.Maildir)
-	} else {
-		log.Printf("maildir: %s\n", Config.Maildir)
-	}
 
 	// init imap folders map
 	imapFolders = make(map[string][]string)
