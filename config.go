@@ -1,8 +1,7 @@
 package main
 
-// configuration module
-//
 // Copyright (c) 2020 - Valentin Kuznetsov <vkuznet AT gmail dot com>
+// configuration module for goimapsync
 //
 
 import (
@@ -28,6 +27,7 @@ type Configuration struct {
 	Servers     []Server `json:"servers"`     // list of IMAP server credentials
 	Maildir     string   `json:"maildir"`     // maildir directory
 	CommonInbox bool     `json:"commonInbox"` // use common inbox for all imap servers
+	DBUri       string   `json:"dbUri"`       // DB URI
 	Verbose     int      `json:"verbose"`     // verbosity level
 }
 
@@ -66,6 +66,12 @@ func ParseConfig(configFile string) error {
 	if err != nil {
 		log.Printf("Unable to parse: file %s, error %v\n", configFile, err)
 		return err
+	}
+	if Config.Maildir == "" {
+		log.Fatal("Please specify maildir in your configuration")
+	}
+	if Config.DBUri == "" {
+		Config.DBUri = fmt.Sprintf("sqlite3://%s/.goimapsync.db\n", Config.Maildir)
 	}
 	return nil
 }

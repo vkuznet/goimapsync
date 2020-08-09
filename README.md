@@ -1,12 +1,21 @@
-### goimapsync
+goimapsync
+==========
+
+[![Build Status](https://travis-ci.org/vkuznet/goimapsync.svg?branch=master)](https://travis-ci.org/vkuznet/goimapsync)
+[![Go Report Card](https://goreportcard.com/badge/github.com/vkuznet/goimapsync)](https://goreportcard.com/report/github.com/vkuznet/goimapsync)
+[![GoDoc](https://godoc.org/github.com/vkuznet/goimapsync?status.svg)](https://godoc.org/github.com/vkuznet/goimapsync)
+
+`goimapsync` is a tool to synchronize IMAP server(s) with local maildir.
+
+### Introduction
+
 The `goimapsync` is a tool to bi-directionally sync local Maildir snapshot to
 IMAP servers of your choice. It supports the following set of actions:
-- *sync*      to sync local maildir with IMAP server(s)
+- *sync*      to fetch abd sync local maildir with IMAP server(s)
 - *fetch-new* to fetch new messages from IMAP
 - *fetch-all* to fetch all messages from IMAP
 - *move*      to move mail(s) on IMAP server to given folder and message id
-- *fullsync*  to fetch and sync mails between IMAP and local maildir
-It reproduces functionality of
+It reproduces (some) functionality of
 [fetchmail](https://www.fetchmail.info/),
 [procmail](https://userpages.umbc.edu/~ian/procmail.html)
 [offlineimap](https://github.com/OfflineIMAP/offlineimap), or
