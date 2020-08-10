@@ -73,6 +73,13 @@ func createTable(db *sql.DB) {
 		log.Fatal(err.Error())
 	}
 	statement.Exec() // Execute SQL Statements
+	// create hid index
+	tableSQL = `create unique index idx_hid on messages (hid);`
+	statement, err = db.Prepare(tableSQL) // Prepare SQL Statement
+	if err != nil {
+		log.Fatal(err.Error())
+	}
+	statement.Exec() // Execute SQL Statements
 }
 
 // insertMessage inserts given message into DB
