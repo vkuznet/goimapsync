@@ -211,13 +211,33 @@ func readImap(c *client.Client, imapName, folder string, newMessages bool) []Mes
 				m.Flags = append(m.Flags, imap.RecentFlag)
 			}
 			wg.Add(1)
-			go writeMail(imapName, folder, m, r, &wg)
+			if !isMailWritten(m) {
+				go writeMail(imapName, folder, m, r, &wg)
+			}
 		}
 		msgs = append(msgs, m)
 		seqNum += 1
 	}
 	wg.Wait()
 	return msgs
+}
+
+// helper function to check if mail was previously written in local maildir
+func isMailWritten(m Message) bool {
+	var mdict map[string]string
+	if Config.CommonInbox {
+		mdict = readMaildir("", "INBOX")
+	} else {
+		for k, v := range readMaildir(m.Imap, "INBOX") {
+			mdict[k] = v
+		}
+	}
+	for hid, _ := range mdict {
+		if hid == m.HashId {
+			return true
+		}
+	}
+	return false
 }
 
 // helper function to create an md5 hash of given message Id
