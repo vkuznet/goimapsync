@@ -16,23 +16,20 @@ IMAP servers of your choice. It supports the following set of actions:
 - *fetch-all* to fetch all messages from IMAP
 - *move*      to move mail(s) on IMAP server to given folder and message id,
   e.g. move message on IMAP to Spam folder
-It reproduces (some) functionality of
+
+The `goimapsync` reproduces (some) functionality of
 [fetchmail](https://www.fetchmail.info/),
 [procmail](https://userpages.umbc.edu/~ian/procmail.html)
 [offlineimap](https://github.com/OfflineIMAP/offlineimap), or
-similary tools and intent to work as main engine for
-[mutt](http://www.mutt.org/) Email client.
-
-Even though these tools work great there are certain level of
+similary tools. Even though these tools work great a certain level of
 expertise is required to setup properly a working environment.
 The `goimapsync` is Go-based tool, with build-in concurrentcy
-which can compile into static executable and provide easy
-setup for mutt.
+which can compile into static executable. It should be used mostly
+with [mutt](http://www.mutt.org/) Email client to fetch and sync
+your emails from IMAP servers and local maildir.
 
 ### Configuration and setup
-To setup everything with mutt email client you only need to get
-a binary file and instruct mutt to use it. To build the code just
-use [Go-lang](https://golang.org/)::
+To build the code just use [Go-lang](https://golang.org/):
 ```
 # build the code
 git clone https://github.com/vkuznet/goimapsync
@@ -55,7 +52,7 @@ goimapsync -config config.json -op=sync
 goimapsync -config config.json -op=move -mid=123 -folder=MyFolder
 ```
 
-### Configuration
+#### goimapsync configuration
 The configuration is rather trivial, please provide your configuration
 file using the following structure:
 ```
@@ -100,3 +97,27 @@ gpg -o $ofile -e -r $key $ifile
 # perform sync operation using your encrypted config file
 gpg -d -o $HOME/.goimapsync.gpg | goimapsync -op=sync -config -
 ```
+
+### Integration with mutt Email client
+To setup everything with mutt email client please put your `goimapsync`
+executable in your PATH and perform two actions:
+- prepare `fetchmail.sh` script to run goimapsync, e.g.
+```
+#!/bin/bash
+gpg -d -o - $HOME/.mutt/goimapsync.gpg | $HOME/bin/goimapsync -op=sync -config - 2>&1 1>& /tmp/goimapsync.log
+```
+Here I speficy how I'd like to run `goimapsync`
+
+- you may assign mutt key to run it at your convenience, e.g.
+you may assign `J` key to mark messages as junk (i.e. move
+them to spam folder on your IMAP server)
+```
+# replace paths to suits your environment
+macro index,pager J  "<pipe-entry>cat | grep -i message-id > /Users/vk/.cache/mutt/mail.html && gpg -d -o - $HOME/.mutt/goimapsync.gpg | $HOME/bin/goimapsync -config - -folder=\"Spam\" -mid=/Users/vk/.cache/mutt/mail.html<enter><delete-message>" "mark message as junk"
+```
+or assign key `o` to fetch and sync your mails
+```
+macro index o "<sync-mailbox><shell-escape>/Users/vk/bin/fetchmail.sh<enter>" "run fetchmail to sync inbox"
+```
+
+Then, fire up your mutt client and enjoy your Emails.
