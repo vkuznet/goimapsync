@@ -232,7 +232,7 @@ func isMailWritten(m Message) bool {
 			mdict[k] = v
 		}
 	}
-	for hid, _ := range mdict {
+	for hid := range mdict {
 		if hid == m.HashId {
 			return true
 		}
