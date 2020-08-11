@@ -65,8 +65,15 @@ func ParseConfig(configFile string) error {
 	if Config.Maildir == "" {
 		log.Fatal("Please specify maildir in your configuration")
 	}
+	// create if necessary Maildir
+	if Config.CommonInbox {
+		for _, d := range []string{"cur", "new", "tmp"} {
+			fpath := fmt.Sprintf("%s/INBOX/%s", Config.Maildir, d)
+			os.MkdirAll(fpath, os.ModePerm)
+		}
+	}
 	if Config.DBUri == "" {
-		Config.DBUri = fmt.Sprintf("sqlite3://%s/.goimapsync.db\n", Config.Maildir)
+		Config.DBUri = fmt.Sprintf("sqlite3://%s/.goimapsync.db", Config.Maildir)
 	}
 	if Config.CommonInbox {
 		log.Printf("maildir: %s, use common inbox for all IMAP servers\n", Config.Maildir)
