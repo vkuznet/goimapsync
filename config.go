@@ -35,7 +35,7 @@ type Configuration struct {
 var Config Configuration
 
 // ParseConfig parse given config file
-func ParseConfig(configFile string) error {
+func ParseConfig(configFile string) {
 	var data []byte
 	var err error
 	if configFile == "-" {
@@ -47,20 +47,17 @@ func ParseConfig(configFile string) error {
 		}
 		data = []byte(content)
 		if err := scanner.Err(); err != nil {
-			log.Println("unable to read from stdin", err)
-			return err
+			log.Fatal("unable to read from stdin", err)
 		}
 	} else {
 		data, err = ioutil.ReadFile(configFile)
 		if err != nil {
-			log.Printf("Unable to read: file %s, error %v\n", configFile, err)
-			return err
+			log.Fatalf("Unable to read: file %s, error %v\n", configFile, err)
 		}
 	}
 	err = json.Unmarshal(data, &Config)
 	if err != nil {
-		log.Printf("Unable to parse: file %s, error %v\n", configFile, err)
-		return err
+		log.Fatalf("Unable to parse: file %s, error %v\n", configFile, err)
 	}
 	if Config.Maildir == "" {
 		log.Fatal("Please specify maildir in your configuration")
@@ -80,5 +77,4 @@ func ParseConfig(configFile string) error {
 	} else {
 		log.Printf("maildir: %s\n", Config.Maildir)
 	}
-	return nil
 }

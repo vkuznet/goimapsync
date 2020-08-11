@@ -293,15 +293,8 @@ func localFolder(imapName, folder string) string {
 	return fmt.Sprintf("%s/%s", imapName, folder)
 }
 
-// helper function to write emails in imapName folder of local maildir
-func writeMail(imapName, folder string, m Message, r io.Reader, wg *sync.WaitGroup) {
-	hid := m.HashId
-	flags := m.Flags
-	start := time.Now()
-	defer timing("writeMail", start)
-	defer wg.Done()
-
-	// construct file name
+// helper function to return short flag names
+func flagSymbols(flags []string) string {
 	var flag string
 	for _, f := range flags {
 		f = strings.ToLower(strings.Replace(f, "\\", "", -1))
@@ -321,18 +314,29 @@ func writeMail(imapName, folder string, m Message, r io.Reader, wg *sync.WaitGro
 	if flag == "" {
 		flag = "S"
 	}
-	// our file name will have format <tstamp.hid.hostname:2,flags> where hid is messageId hash
-	tstamp := time.Now().Unix()
+	return flag
+}
+
+// helper function to write emails in imapName folder of local maildir
+func writeMail(imapName, folder string, m Message, r io.Reader, wg *sync.WaitGroup) {
+	hid := m.HashId  // hash id of the message id
+	flags := m.Flags // message flags
+	start := time.Now()
+	defer timing("writeMail", start)
+	defer wg.Done()
+
+	// construct file name with the following format:
+	// tstamp.hid.hostname:2,flags
+	tstamp := start.Unix()
+	flag := flagSymbols(flags)
 	if Config.Verbose > 0 {
 		log.Println("writeMail", tstamp, hid, flags, flag)
 	}
-	fname := fmt.Sprintf("%d.%s.%s:2,%s", tstamp, hid, hostname, flag)
-	if strings.Contains(flag, "N") {
-		fname = fmt.Sprintf("%d.%s.%s", tstamp, hid, hostname)
-	}
 	fdir := localFolder(imapName, folder)
+	fname := fmt.Sprintf("%d.%s.%s:2,%s", tstamp, hid, hostname, flag)
 	fpath := fmt.Sprintf("%s/%s/cur/%s", Config.Maildir, fdir, fname)
 	if strings.Contains(flag, "N") {
+		fname = fmt.Sprintf("%d.%s.%s", tstamp, hid, hostname)
 		fpath = fmt.Sprintf("%s/%s/new/%s", Config.Maildir, fdir, fname)
 	}
 	// check if our file exist
@@ -473,6 +477,9 @@ func MoveMessage(c *client.Client, imapName string, msg Message, folderName stri
 // Move message on IMAP to a given folder, if folder name is not given the mail
 // will be deleted
 func Move(c *client.Client, imapName, match, folderName string) {
+	if folderName == "" || match == "" {
+		log.Fatal("Move operation requires both folder and message id")
+	}
 	start := time.Now()
 	defer timing("Move", start)
 	// inbox folder
@@ -649,25 +656,19 @@ func main() {
 		fmt.Println("   goimapsync -config config.json -op=move -mid=123 -folder=MyFolder")
 	}
 	flag.Parse()
-	err := ParseConfig(config)
-	if err != nil {
-		log.Println("Unable to parse config file", config, err)
-	}
+	ParseConfig(config)
+	log.SetFlags(log.LstdFlags)
 	// overwrite verbose level in config
 	if verbose > 0 {
 		Config.Verbose = verbose
-	}
-	// log time, filename, and line number
-	if Config.Verbose > 0 {
 		log.SetFlags(log.LstdFlags | log.Lshortfile)
-	} else {
-		log.SetFlags(log.LstdFlags)
 	}
 	// add timing profile
 	start := time.Now()
 	defer timing("main", start)
 
 	// init imap folders map
+	var err error
 	imapFolders = make(map[string][]string)
 	hostname, err = os.Hostname()
 	if err != nil {
@@ -693,13 +694,9 @@ func main() {
 	}
 	switch op {
 	case "move":
-		if folder != "" && mid != "" {
-			// perform move action for given message id and IMAP folder
-			for name, c := range cmap {
-				Move(c, name, mid, folder)
-			}
-		} else {
-			log.Fatal("Move operation requires both folder and message id")
+		// perform move action for given message id and IMAP folder
+		for name, c := range cmap {
+			Move(c, name, mid, folder)
 		}
 	case "fetch-new":
 		// fetch new messages for given IMAP folder
