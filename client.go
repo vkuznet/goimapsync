@@ -201,7 +201,7 @@ func readImap(c *client.Client, imapName, folder string, newMessages bool) []Mes
 		log.Printf("read %s %v out of %v from %s\n", m.String(), seqNum, nmsg, imapName)
 		r := msg.GetBody(section)
 		entry, e := findMessage(hid)
-		log.Println("found in DB", entry.String(), e)
+		log.Println("hid", hid, "DB entry", entry.String(), e)
 		if e == nil && entry.HashId == hid {
 			if Config.Verbose > 0 {
 				log.Println("Mail with hash", hid, "already exists")
@@ -210,8 +210,8 @@ func readImap(c *client.Client, imapName, folder string, newMessages bool) []Mes
 			if newMessages {
 				m.Flags = append(m.Flags, imap.RecentFlag)
 			}
-			wg.Add(1)
 			if !isMailWritten(m) {
+				wg.Add(1)
 				go writeMail(imapName, folder, m, r, &wg)
 			}
 		}
@@ -380,7 +380,7 @@ func writeMail(imapName, folder string, m Message, r io.Reader, wg *sync.WaitGro
 	m.Path = fpath
 	err = insertMessage(m)
 	if err != nil {
-		log.Fatal("message was written to file-system but not in DB", err)
+		log.Fatal("message was written to file-system but not in DB, error: ", err)
 	}
 }
 
@@ -609,6 +609,19 @@ func Sync(cmap map[string]*client.Client, dryRun bool) {
 			}
 		}
 	}
+	// clean-up local DB, get list of all messages from DB
+	// and delete those which are not in local maildir
+	/*
+		dblist, err := getDBMessages()
+		if err == nil {
+			for _, m := range dblist {
+				if _, ok := mdict[m.HashId]; !ok {
+					log.Println("Message", m, "not found in local DB, will delete it")
+					deleteMessage(m.HashId)
+				}
+			}
+		}
+	*/
 }
 
 // helper function to report timing of given function
