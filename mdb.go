@@ -158,3 +158,33 @@ func findMessage(hid string) (Message, error) {
 	}
 	return m, nil
 }
+
+// helper function to get all messages from local DB
+func getDBMessages() ([]Message, error) {
+	var mlist []Message
+	// proceed with transaction operation
+	tx, err := mdb.Begin()
+	if err != nil {
+		log.Printf("unable to start transaction in DB: %v\n", err)
+		return mlist, err
+	}
+	defer tx.Rollback()
+	// look-up files info
+	stmt := "SELECT hid, mid, path, imap FROM messages"
+	res, err := tx.Query(stmt)
+	if err != nil {
+		log.Printf("unable to query DB: %v\n", err)
+		return mlist, err
+	}
+	for res.Next() {
+		var hid, mid, path, imap string
+		err = res.Scan(&hid, &mid, &path, &imap)
+		if err != nil {
+			log.Printf("unable to scan in DB: %v\n", err)
+			return mlist, tx.Rollback()
+		}
+		m := Message{HashId: hid, MessageId: mid, Path: path, Imap: imap}
+		mlist = append(mlist, m)
+	}
+	return mlist, nil
+}
