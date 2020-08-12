@@ -451,20 +451,21 @@ func MoveMessage(c *client.Client, imapName string, msg Message, folderName stri
 		log.Printf("move %v to '%s' on %s\n", msg.MessageId, folder, imapName)
 	}
 
-	// mark mail as seen in our inbox
-	item := imap.FormatFlagsOp(imap.AddFlags, true)
-	flags := []interface{}{imap.SeenFlag}
-	if err := c.Store(seqset, item, flags, nil); err != nil {
-		log.Fatal(err)
-	}
 	// copy mail to folder
 	if folder != "" {
+		// mark mail as seen in our inbox
+		item := imap.FormatFlagsOp(imap.AddFlags, true)
+		flags := []interface{}{imap.SeenFlag}
+		if err := c.Store(seqset, item, flags, nil); err != nil {
+			log.Fatal(err)
+		}
 		if err := c.Copy(seqset, folder); err != nil {
 			log.Fatal(err)
 		}
 	}
 	// mark mail as deleted on IMAP server
-	flags = []interface{}{imap.DeletedFlag}
+	item := imap.FormatFlagsOp(imap.AddFlags, true)
+	flags := []interface{}{imap.DeletedFlag}
 	if err := c.Store(seqset, item, flags, nil); err != nil {
 		log.Fatal(err)
 	}
