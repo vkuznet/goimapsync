@@ -181,6 +181,11 @@ func readImap(c *client.Client, imapName, folder string, newMessages bool) []Mes
 		done <- c.Fetch(seqset, items, messages)
 	}()
 
+	// read from fetch error channel before reading messages
+	//     if err := <-done; err != nil {
+	//         log.Fatal(err)
+	//     }
+
 	seqNum := uint32(1)
 	var msgs []Message
 	var wg sync.WaitGroup
@@ -213,6 +218,13 @@ func readImap(c *client.Client, imapName, folder string, newMessages bool) []Mes
 			if !isMailWritten(m) {
 				wg.Add(1)
 				go writeMail(imapName, folder, m, r, &wg)
+			} else {
+				// check if mail is presented in our DB, if not we should insert its entry
+				msg, e := findMessage(m.HashId)
+				if e == nil && msg.HashId == "" {
+					m.Path = findPath(m.Imap, m.HashId)
+					insertMessage(m)
+				}
 			}
 		}
 		msgs = append(msgs, m)
@@ -220,6 +232,22 @@ func readImap(c *client.Client, imapName, folder string, newMessages bool) []Mes
 	}
 	wg.Wait()
 	return msgs
+}
+
+// helper function to find message path in local maildir
+func findPath(imapName, hid string) string {
+	var mdict map[string]string
+	if Config.CommonInbox {
+		mdict = readMaildir("", "INBOX")
+	} else {
+		for k, v := range readMaildir(imapName, "INBOX") {
+			mdict[k] = v
+		}
+	}
+	if path, ok := mdict[hid]; ok {
+		return path
+	}
+	return ""
 }
 
 // helper function to check if mail was previously written in local maildir
@@ -515,6 +543,10 @@ func Move(c *client.Client, imapName, match, folderName string) {
 		done <- c.Fetch(seqset, items, messages)
 	}()
 
+	// read from fetch error channel before reading messages
+	//     if err := <-done; err != nil {
+	//         log.Fatal(err)
+	//     }
 	seqNum := uint32(1)
 	for msg := range messages {
 		if Config.Verbose > 1 {
@@ -586,43 +618,113 @@ func Sync(cmap map[string]*client.Client, dryRun bool) {
 		}
 	}
 
-	// now loop over messages we got from IMAP and delete those
-	// which already deleted in local maildir
+	// now loop over messages we got from IMAP and compare with our local maildir
+	// then we collect message ids for deletion
+	var mids []string
 	for _, msg := range mlist {
 		// check if our message exists in DB
 		m, e := findMessage(msg.HashId)
 		if e == nil && m.HashId == msg.HashId {
 			// we found message in DB, check if it exists in local maildir
 			if _, ok := mdict[m.HashId]; !ok {
-				// message is not found in local maildir
-
-				// delete message on server
+				// message is not found in local maildir and we need to delete it
 				if dryRun {
 					log.Println("dry-run expunge", msg.String())
 				} else {
-					// delete message in IMAP server
-					if c, ok := cmap[msg.Imap]; ok {
-						MoveMessage(c, msg.Imap, msg, "")
-					}
-					// delete message in DB
-					deleteMessage(msg.HashId)
+					mids = append(mids, msg.MessageId)
 				}
 			}
 		}
 	}
-	// clean-up local DB, get list of all messages from DB
-	// and delete those which are not in local maildir
-	/*
-		dblist, err := getDBMessages()
-		if err == nil {
-			for _, m := range dblist {
-				if _, ok := mdict[m.HashId]; !ok {
-					log.Println("Message", m, "not found in local DB, will delete it")
-					deleteMessage(m.HashId)
-				}
-			}
+	if !dryRun {
+		removeImapMessages(cmap, mids)
+	}
+}
+
+// helper function to remove messages in IMAP server(s)
+// it takes list of message ids
+func removeImapMessages(cmap map[string]*client.Client, mids []string) {
+	start := time.Now()
+	defer timing("removeImapMessages", start)
+
+	if Config.Verbose > 0 {
+		log.Println("removeImapMessages", mids)
+	}
+	for imapName, c := range cmap {
+		// select messages from IMAP inbox folder
+		inboxFolder := imapFolder(imapName, "inbox")
+		mbox, err := c.Select(inboxFolder, false)
+		if err != nil {
+			log.Fatal(err)
 		}
-	*/
+
+		// fetch message envelopes
+		seqset := new(imap.SeqSet)
+		from := uint32(1)
+		to := mbox.Messages
+		seqset.AddRange(from, to)
+		messages := make(chan *imap.Message, to)
+		items := []imap.FetchItem{imap.FetchEnvelope}
+		done := make(chan error, 1)
+		go func() {
+			done <- c.Fetch(seqset, items, messages)
+		}()
+
+		// read from fetch error channel before reading messages
+		if err := <-done; err != nil {
+			log.Fatal(err)
+		}
+
+		// loop over fetched messages and check if message needs to be deleted
+		seqset = new(imap.SeqSet)
+		seqNum := uint32(1)
+		var hids []string
+		for msg := range messages {
+			if msg == nil || msg.Envelope == nil {
+				log.Fatal("capture nil msg", msg)
+			}
+			mid := msg.Envelope.MessageId
+			if inList(mid, mids) { // we found match for deletion
+				seqset.AddNum(seqNum)
+				hids = append(hids, md5hash(mid))
+			}
+			seqNum += 1
+		}
+		if Config.Verbose > 0 {
+			log.Println("remove seqset", seqset, "hids", hids)
+		}
+		if len(hids) == 0 || seqset.Empty() {
+			return
+		}
+		// now we mark messages for deletion in IMAP
+		item := imap.FormatFlagsOp(imap.AddFlags, true)
+		flags := []interface{}{imap.DeletedFlag}
+		if err := c.Store(seqset, item, flags, nil); err != nil {
+			log.Fatal(err)
+		}
+		// then delete it in inbox folder
+		if err := c.Expunge(nil); err != nil {
+			log.Fatal(err)
+		}
+		// and we delete messages in local maildir DB
+		for _, hid := range hids {
+			deleteMessage(hid)
+		}
+	}
+}
+
+// helper function to check if given string entry in a list
+func inList(a string, list []string) bool {
+	check := 0
+	for _, b := range list {
+		if b == a {
+			check += 1
+		}
+	}
+	if check != 0 {
+		return true
+	}
+	return false
 }
 
 // helper function to report timing of given function
