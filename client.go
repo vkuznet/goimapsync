@@ -673,7 +673,7 @@ func removeImapMessages(cmap map[string]*client.Client, mlist []Message) {
 		seqset := new(imap.SeqSet)
 		seqset.AddNum(slist...)
 		if Config.Verbose > 0 {
-			log.Println("remove seqset", seqset, "on", imapName)
+			log.Printf("%s, remove seqset: %v\n", impaName, seqset)
 		}
 		if seqset.Empty() {
 			continue
