@@ -176,15 +176,10 @@ func readImap(c *client.Client, imapName, folder string, newMessages bool) []Mes
 
 	messages := make(chan *imap.Message, nmsg)
 	items := []imap.FetchItem{section.FetchItem(), imap.FetchFlags, imap.FetchEnvelope}
-	done := make(chan error, 1)
-	go func() {
-		done <- c.Fetch(seqset, items, messages)
-	}()
-
-	// read from fetch error channel before reading messages
-	//     if err := <-done; err != nil {
-	//         log.Fatal(err)
-	//     }
+	err = c.Fetch(seqset, items, messages)
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	seqNum := uint32(1)
 	var msgs []Message
@@ -538,15 +533,11 @@ func Move(c *client.Client, imapName, match, folderName string) {
 
 	messages := make(chan *imap.Message, to)
 	items := []imap.FetchItem{imap.FetchFlags, imap.FetchUid, imap.FetchEnvelope}
-	done := make(chan error, 1)
-	go func() {
-		done <- c.Fetch(seqset, items, messages)
-	}()
+	err = c.Fetch(seqset, items, messages)
+	if err != nil {
+		log.Fatal(err)
+	}
 
-	// read from fetch error channel before reading messages
-	//     if err := <-done; err != nil {
-	//         log.Fatal(err)
-	//     }
 	seqNum := uint32(1)
 	for msg := range messages {
 		if Config.Verbose > 1 {
@@ -665,13 +656,8 @@ func removeImapMessages(cmap map[string]*client.Client, mids []string) {
 		seqset.AddRange(from, to)
 		messages := make(chan *imap.Message, to)
 		items := []imap.FetchItem{imap.FetchEnvelope}
-		done := make(chan error, 1)
-		go func() {
-			done <- c.Fetch(seqset, items, messages)
-		}()
-
-		// read from fetch error channel before reading messages
-		if err := <-done; err != nil {
+		err = c.Fetch(seqset, items, messages)
+		if err != nil {
 			log.Fatal(err)
 		}
 
