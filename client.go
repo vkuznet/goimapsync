@@ -176,10 +176,16 @@ func readImap(c *client.Client, imapName, folder string, newMessages bool) []Mes
 
 	messages := make(chan *imap.Message, nmsg)
 	items := []imap.FetchItem{section.FetchItem(), imap.FetchFlags, imap.FetchEnvelope}
-	err = c.Fetch(seqset, items, messages)
-	if err != nil {
-		log.Fatal(err)
-	}
+	// TODO: use goroutine until this issue will be solved
+	// https://github.com/emersion/go-imap/issues/382
+	done := make(chan error, 1)
+	go func() {
+		done <- c.Fetch(seqset, items, messages)
+	}()
+	//     err = c.Fetch(seqset, items, messages)
+	//     if err != nil {
+	//         log.Fatal(err)
+	//     }
 
 	seqNum := uint32(1)
 	var msgs []Message
@@ -533,10 +539,16 @@ func Move(c *client.Client, imapName, match, folderName string) {
 
 	messages := make(chan *imap.Message, to)
 	items := []imap.FetchItem{imap.FetchFlags, imap.FetchUid, imap.FetchEnvelope}
-	err = c.Fetch(seqset, items, messages)
-	if err != nil {
-		log.Fatal(err)
-	}
+	// TODO: use goroutine until this issue will be solved
+	// https://github.com/emersion/go-imap/issues/382
+	done := make(chan error, 1)
+	go func() {
+		done <- c.Fetch(seqset, items, messages)
+	}()
+	//     err = c.Fetch(seqset, items, messages)
+	//     if err != nil {
+	//         log.Fatal(err)
+	//     }
 
 	seqNum := uint32(1)
 	for msg := range messages {
@@ -611,7 +623,7 @@ func Sync(cmap map[string]*client.Client, dryRun bool) {
 
 	// now loop over messages we got from IMAP and compare with our local maildir
 	// then we collect message ids for deletion
-	var mids []string
+	var dlist []Message
 	for _, msg := range mlist {
 		// check if our message exists in DB
 		m, e := findMessage(msg.HashId)
@@ -622,65 +634,49 @@ func Sync(cmap map[string]*client.Client, dryRun bool) {
 				if dryRun {
 					log.Println("dry-run expunge", msg.String())
 				} else {
-					mids = append(mids, msg.MessageId)
+					dlist = append(dlist, msg)
 				}
 			}
 		}
 	}
 	if !dryRun {
-		removeImapMessages(cmap, mids)
+		removeImapMessages(cmap, dlist)
 	}
 }
 
 // helper function to remove messages in IMAP server(s)
-// it takes list of message ids
-func removeImapMessages(cmap map[string]*client.Client, mids []string) {
+// it takes list of messages
+func removeImapMessages(cmap map[string]*client.Client, mlist []Message) {
 	start := time.Now()
 	defer timing("removeImapMessages", start)
 
 	if Config.Verbose > 0 {
-		log.Println("removeImapMessages", mids)
+		log.Println("removeImapMessages", mlist)
 	}
 	for imapName, c := range cmap {
 		// select messages from IMAP inbox folder
 		inboxFolder := imapFolder(imapName, "inbox")
-		mbox, err := c.Select(inboxFolder, false)
+		_, err := c.Select(inboxFolder, false)
 		if err != nil {
 			log.Fatal(err)
 		}
 
-		// fetch message envelopes
+		// get list of message seq numbers for our IMAP server
+		var slist []uint32
+		var hlist []string
+		for _, m := range mlist {
+			if m.Imap == imapName {
+				slist = append(slist, m.SeqNumber)
+				hlist = append(hlist, m.HashId)
+			}
+		}
 		seqset := new(imap.SeqSet)
-		from := uint32(1)
-		to := mbox.Messages
-		seqset.AddRange(from, to)
-		messages := make(chan *imap.Message, to)
-		items := []imap.FetchItem{imap.FetchEnvelope}
-		err = c.Fetch(seqset, items, messages)
-		if err != nil {
-			log.Fatal(err)
-		}
-
-		// loop over fetched messages and check if message needs to be deleted
-		seqset = new(imap.SeqSet)
-		seqNum := uint32(1)
-		var hids []string
-		for msg := range messages {
-			if msg == nil || msg.Envelope == nil {
-				log.Fatal("capture nil msg", msg)
-			}
-			mid := msg.Envelope.MessageId
-			if inList(mid, mids) { // we found match for deletion
-				seqset.AddNum(seqNum)
-				hids = append(hids, md5hash(mid))
-			}
-			seqNum += 1
-		}
+		seqset.AddNum(slist...)
 		if Config.Verbose > 0 {
-			log.Println("remove seqset", seqset, "hids", hids)
+			log.Println("remove seqset", seqset, "on", imapName)
 		}
-		if len(hids) == 0 || seqset.Empty() {
-			return
+		if seqset.Empty() {
+			continue
 		}
 		// now we mark messages for deletion in IMAP
 		item := imap.FormatFlagsOp(imap.AddFlags, true)
@@ -688,29 +684,15 @@ func removeImapMessages(cmap map[string]*client.Client, mids []string) {
 		if err := c.Store(seqset, item, flags, nil); err != nil {
 			log.Fatal(err)
 		}
-		// then delete it in inbox folder
+		// delete messages on IMAP server
 		if err := c.Expunge(nil); err != nil {
 			log.Fatal(err)
 		}
-		// and we delete messages in local maildir DB
-		for _, hid := range hids {
+		// delete messages in local maildir DB
+		for _, hid := range hlist {
 			deleteMessage(hid)
 		}
 	}
-}
-
-// helper function to check if given string entry in a list
-func inList(a string, list []string) bool {
-	check := 0
-	for _, b := range list {
-		if b == a {
-			check += 1
-		}
-	}
-	if check != 0 {
-		return true
-	}
-	return false
 }
 
 // helper function to report timing of given function
