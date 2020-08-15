@@ -29,6 +29,7 @@ type Configuration struct {
 	CommonInbox bool     `json:"commonInbox"` // use common inbox for all imap servers
 	DBUri       string   `json:"dbUri"`       // DB URI
 	Verbose     int      `json:"verbose"`     // verbosity level
+	Profiler    string   `json:"profiler"`    // profiler file name
 }
 
 // Config variable represents configuration object

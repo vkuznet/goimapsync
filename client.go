@@ -91,8 +91,8 @@ func getMessageId(fname string) string {
 
 // helper function to connect to our IMAP servers
 func connect() map[string]*client.Client {
-	start := time.Now()
-	defer timing("connect", start)
+	defer timing("connect", time.Now())
+	defer profiler("connect")()
 	cmap := make(map[string]*client.Client)
 
 	ch := make(chan ServerClient, len(Config.Servers))
@@ -135,8 +135,8 @@ func logout(cmap map[string]*client.Client) {
 // helper function which takes a snapshot of remote IMAP servers
 // and return list of messages
 func readImap(c *client.Client, imapName, folder string, newMessages bool) []Message {
-	start := time.Now()
-	defer timing("readImap", start)
+	defer timing("readImap", time.Now())
+	defer profiler("readImap")()
 
 	// Select given imap folder
 	mbox, err := c.Select(folder, false)
@@ -207,7 +207,9 @@ func readImap(c *client.Client, imapName, folder string, newMessages bool) []Mes
 		log.Printf("read %s %v out of %v from %s\n", m.String(), seqNum, nmsg, imapName)
 		r := msg.GetBody(section)
 		entry, e := findMessage(hid)
-		log.Println("hid", hid, "DB entry", entry.String(), e)
+		if Config.Verbose > 1 {
+			log.Println("hid", hid, "DB entry", entry.String(), e)
+		}
 		if e == nil && entry.HashId == hid {
 			if Config.Verbose > 0 {
 				log.Println("Mail with hash", hid, "already exists")
@@ -350,13 +352,13 @@ func flagSymbols(flags []string) string {
 func writeMail(imapName, folder string, m Message, r io.Reader, wg *sync.WaitGroup) {
 	hid := m.HashId  // hash id of the message id
 	flags := m.Flags // message flags
-	start := time.Now()
-	defer timing("writeMail", start)
+	defer timing("writeMail", time.Now())
+	defer profiler("writeMail")()
 	defer wg.Done()
 
 	// construct file name with the following format:
 	// tstamp.hid.hostname:2,flags
-	tstamp := start.Unix()
+	tstamp := time.Now().Unix()
 	flag := flagSymbols(flags)
 	if Config.Verbose > 0 {
 		log.Println("writeMail", tstamp, hid, flags, flag)
@@ -459,8 +461,8 @@ func imapFolder(imapName, folder string) string {
 
 // MoveMessage moves message in given imap server into specifc folder
 func MoveMessage(c *client.Client, imapName string, msg Message, folderName string) {
-	start := time.Now()
-	defer timing("MoveMessage", start)
+	defer timing("MoveMessage", time.Now())
+	defer profiler("MoveMessage")()
 	// inbox folder
 	inboxFolder := imapFolder(imapName, "inbox")
 	folder := imapFolder(imapName, folderName)
@@ -510,8 +512,8 @@ func Move(c *client.Client, imapName, match, folderName string) {
 	if folderName == "" || match == "" {
 		log.Fatal("Move operation requires both folder and message id")
 	}
-	start := time.Now()
-	defer timing("Move", start)
+	defer timing("Move", time.Now())
+	defer profiler("Move")()
 	// inbox folder
 	inboxFolder := imapFolder(imapName, "inbox")
 	folder := imapFolder(imapName, folderName)
@@ -573,8 +575,8 @@ func Move(c *client.Client, imapName, match, folderName string) {
 
 // Fetch content of given folder from IMAP into local maildir
 func Fetch(c *client.Client, imapName, folder string, newMessages bool) {
-	start := time.Now()
-	defer timing("Fetch", start)
+	defer timing("Fetch", time.Now())
+	defer profiler("Fetch")()
 	log.Printf("Fetch %s from %s\n", folder, imapName)
 	for _, m := range readImap(c, imapName, folder, newMessages) {
 		if Config.Verbose > 0 {
@@ -585,8 +587,8 @@ func Fetch(c *client.Client, imapName, folder string, newMessages bool) {
 
 // Sync provides sync between local maildir and IMAP servers
 func Sync(cmap map[string]*client.Client, dryRun bool) {
-	start := time.Now()
-	defer timing("Sync", start)
+	defer timing("Sync", time.Now())
+	defer profiler("Sync")()
 
 	var mlist []Message
 	for imapName, c := range cmap {
@@ -647,8 +649,8 @@ func Sync(cmap map[string]*client.Client, dryRun bool) {
 // helper function to remove messages in IMAP server(s)
 // it takes list of messages
 func removeImapMessages(cmap map[string]*client.Client, mlist []Message) {
-	start := time.Now()
-	defer timing("removeImapMessages", start)
+	defer timing("removeImapMessages", time.Now())
+	defer profiler("removeImapMessages")()
 
 	if Config.Verbose > 0 {
 		log.Println("removeImapMessages", mlist)
@@ -715,6 +717,8 @@ func main() {
 	flag.StringVar(&folder, "folder", "INBOX", "folder to use")
 	var op string
 	flag.StringVar(&op, "op", "sync", "perform given operation")
+	var profiler string
+	flag.StringVar(&profiler, "profiler", "", "profiler file name")
 	var verbose int
 	flag.IntVar(&verbose, "verbose", 0, "verbosity level")
 	flag.Usage = func() {
@@ -747,9 +751,12 @@ func main() {
 		Config.Verbose = verbose
 		log.SetFlags(log.LstdFlags | log.Lshortfile)
 	}
+	if profiler != "" {
+		Config.Profiler = profiler
+		initProfiler(profiler)
+	}
 	// add timing profile
-	start := time.Now()
-	defer timing("main", start)
+	defer timing("main", time.Now())
 
 	// init imap folders map
 	var err error
