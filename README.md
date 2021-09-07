@@ -2,7 +2,7 @@ goimapsync
 ==========
 
 [![Build Status](https://github.com/vkuznet/goimapsync/actions/workflows/go.yml/badge.svg)](https://github.com/vkuznet/goimapsync/actions/workflows/go.yml)
-[![Travis Build Status](https://travis-ci.org/vkuznet/goimapsync.svg?branch=master)](https://travis-ci.org/vkuznet/goimapsync)
+<!--[![Travis Build Status](https://travis-ci.org/vkuznet/goimapsync.svg?branch=master)](https://travis-ci.org/vkuznet/goimapsync)-->
 [![Go Report Card](https://goreportcard.com/badge/github.com/vkuznet/goimapsync)](https://goreportcard.com/report/github.com/vkuznet/goimapsync)
 [![GoDoc](https://godoc.org/github.com/vkuznet/goimapsync?status.svg)](https://godoc.org/github.com/vkuznet/goimapsync)
 
