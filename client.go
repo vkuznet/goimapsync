@@ -19,6 +19,7 @@ import (
 	"log"
 	"net/mail"
 	"os"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -29,6 +30,16 @@ import (
 
 // global variable to keep pointer to mdb
 var mdb *sql.DB
+
+// version of the code
+var gitVersion, gitTag string
+
+// Info function returns version string of the server
+func info() string {
+	goVersion := runtime.Version()
+	tstamp := time.Now().Format("2006-02-01")
+	return fmt.Sprintf("gpm git=%s tag=%s go=%s date=%s", gitVersion, gitTag, goVersion, tstamp)
+}
 
 // global variables we use across the code
 var imapFolders map[string][]string
@@ -719,6 +730,8 @@ func main() {
 	flag.StringVar(&op, "op", "sync", "perform given operation")
 	var profiler string
 	flag.StringVar(&profiler, "profiler", "", "profiler file name")
+	var version bool
+	flag.BoolVar(&version, "version", false, "Show version")
 	var verbose int
 	flag.IntVar(&verbose, "verbose", 0, "verbosity level")
 	flag.Usage = func() {
@@ -744,6 +757,13 @@ func main() {
 		fmt.Println("   goimapsync -config config.json -op=move -mid=123 -folder=MyFolder")
 	}
 	flag.Parse()
+
+	if version {
+		fmt.Println(info())
+		os.Exit(0)
+
+	}
+
 	ParseConfig(config)
 	log.SetFlags(log.LstdFlags)
 	// overwrite verbose level in config
