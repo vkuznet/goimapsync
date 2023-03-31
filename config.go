@@ -22,14 +22,33 @@ type Server struct {
 	UseTls   bool   `json:"useTls"`   // use TLS connection
 }
 
+// Filter structure provides Email filter to follow, e.g.
+// match email address/subject/body and forward it to new recepient
+type Filter struct {
+	From    string `json:"from"`    // from address pattern
+	Subject string `json:"subject"` // subject pattern
+	Body    string `json:"body"`    // body pattern
+	Forward string `json:"forward"` // forward email
+}
+
+// SmtpServer represents SMTP server information
+type SmtpServer struct {
+	Port     string `json:"port"`     // SMTP port
+	Host     string `json:"host"`     // SMTP host
+	From     string `json:"from"`     // from (user's email address)
+	Password string `json:"password"` // user's password
+}
+
 // Configuration stores DAS configuration parameters
 type Configuration struct {
-	Servers     []Server `json:"servers"`     // list of IMAP server credentials
-	Maildir     string   `json:"maildir"`     // maildir directory
-	CommonInbox bool     `json:"commonInbox"` // use common inbox for all imap servers
-	DBUri       string   `json:"dbUri"`       // DB URI
-	Verbose     int      `json:"verbose"`     // verbosity level
-	Profiler    string   `json:"profiler"`    // profiler file name
+	Servers     []Server   `json:"servers"`     // list of IMAP server credentials
+	SmtpServer  SmtpServer `json:"smtp_server"` // SMTP server info
+	Maildir     string     `json:"maildir"`     // maildir directory
+	CommonInbox bool       `json:"commonInbox"` // use common inbox for all imap servers
+	DBUri       string     `json:"dbUri"`       // DB URI
+	Verbose     int        `json:"verbose"`     // verbosity level
+	Profiler    string     `json:"profiler"`    // profiler file name
+	Filters     []Filter   `json:"filters"`     // forward filters
 }
 
 // Config variable represents configuration object
