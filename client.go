@@ -18,7 +18,9 @@ import (
 	"io/ioutil"
 	"log"
 	"net/mail"
+	"net/smtp"
 	"os"
+	"regexp"
 	"runtime"
 	"strings"
 	"sync"
@@ -244,7 +246,9 @@ func readImap(c *client.Client, imapName, folder string, newMessages bool) []Mes
 		msgs = append(msgs, m)
 		seqNum += 1
 	}
+	log.Println("read all messages, time to quit")
 	wg.Wait()
+	log.Println("quit readImap")
 	return msgs
 }
 
@@ -418,12 +422,81 @@ func writeMail(imapName, folder string, m Message, r io.Reader, wg *sync.WaitGro
 			return
 		}
 	}
+	// run filters
+	filterMessage(msg, body)
+
 	// write message info into DB
 	m.Path = fpath
 	err = insertMessage(m)
 	if err != nil {
 		log.Fatal("message was written to file-system but not in DB, error: ", err)
 	}
+}
+
+// helper function to perform filter operation on a given message
+func filterMessage(msg *mail.Message, body []byte) {
+	header := msg.Header
+	from := header.Get("From")
+	subject := header.Get("Subject")
+	log.Printf("### filterMessage from '%s' subject '%s'", from, subject)
+	if from == "" || subject == "" {
+		return
+	}
+	for _, f := range Config.Filters {
+		if f.From != "" && f.Subject != "" {
+			matched1, err1 := regexp.MatchString(f.From, from)
+			matched2, err2 := regexp.MatchString(f.Subject, subject)
+			log.Printf("### use filter %+v", f)
+			if matched1 && err1 == nil && matched2 && err2 == nil {
+				log.Printf("### match, send email to '%s' subject: '%s'", f.Forward, subject)
+				sendEmail(f.Forward, header, body)
+				continue
+			}
+		}
+	}
+}
+
+// helper function to send email to recepient
+// https://www.loginradius.com/blog/async/sending-emails-with-golang/
+// https://zetcode.com/golang/email-smtp/
+func sendEmail(recepient string, headers mail.Header, body []byte) {
+
+	// Sender data.
+	from := Config.SmtpServer.From
+	password := Config.SmtpServer.Password
+
+	// Receiver email address.
+	to := []string{recepient}
+
+	// smtp server configuration.
+	smtpHost := Config.SmtpServer.Host
+	smtpPort := Config.SmtpServer.Port
+
+	// Message.
+	//     message := []byte(body)
+	message := fmt.Sprintf("From: %s\r\nTo: %s\r\n", from, recepient)
+	for k, v := range headers {
+		key := strings.ToLower(k)
+		if key == "subject" || key == "content-type" || key == "content-transfer-encoding" || key == "mime-version" {
+			values := strings.Join(v, "; ")
+			message = fmt.Sprintf("%s: %s\r\n%s", k, values, message)
+		}
+	}
+
+	message = fmt.Sprintf("%s\r\n%s\r\n", message, string(body))
+	//     message := fmt.Sprintf("From: %s\r\nTo: %s\r\nSubject: %s\r\n\r\n%s\r\n", from, recepient, subject, string(body))
+
+	// Authentication.
+	auth := smtp.PlainAuth("", from, password, smtpHost)
+
+	// Sending email.
+	//     err = smtp.SendMail(smtpHost+":"+smtpPort, auth, from, to, message)
+	err := smtp.SendMail(smtpHost+":"+smtpPort, auth, from, to, []byte(message))
+	if err != nil {
+		log.Println(err)
+		return
+	}
+	log.Println("### Email Sent Successfully!")
 }
 
 // helper function to get list of all imap folders
@@ -717,6 +790,30 @@ func timing(name string, start time.Time) {
 	}
 }
 
+// sendEmail sends email to SMTP server, user should provide the following
+// host, e.g. "127.0.0.1"
+// port, e.g. "1025"
+// from, e.g. name@host.com
+// password to authenticate with SMTP server
+// to: list of addresses where to send
+// message: message data
+func sendEmailOld(host, port, from, password string, to []string, message []byte) error {
+	// smtp server configuration.
+	smtpHost := "127.0.0.1"
+	smtpPort := "1025"
+
+	// Authentication.
+	auth := smtp.PlainAuth("", from, password, smtpHost)
+
+	// Sending email.
+	err := smtp.SendMail(smtpHost+":"+smtpPort, auth, from, to, message)
+	if err != nil {
+		log.Println(err)
+		return err
+	}
+	return nil
+}
+
 func main() {
 	var config string
 	flag.StringVar(&config, "config", os.Getenv("HOME")+"/.goimapsyncrc", "config JSON file")
@@ -757,6 +854,7 @@ func main() {
 		fmt.Println("   goimapsync -config config.json -op=move -mid=123 -folder=MyFolder")
 	}
 	flag.Parse()
+	log.SetFlags(log.LstdFlags | log.Lshortfile)
 
 	if version {
 		fmt.Println(info())
