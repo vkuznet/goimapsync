@@ -151,6 +151,10 @@ func readImap(c *client.Client, imapName, folder string, newMessages bool) []Mes
 	defer timing("readImap", time.Now())
 	defer profiler("readImap")()
 
+	if Config.Verbose > 1 {
+		log.Printf("call readImap name=%v folder=%v read new message %v", imapName, folder, newMessages)
+	}
+
 	// Select given imap folder
 	mbox, err := c.Select(folder, false)
 	if err != nil {
@@ -165,6 +169,9 @@ func readImap(c *client.Client, imapName, folder string, newMessages bool) []Mes
 		// get only new messages
 		criteria := imap.NewSearchCriteria()
 		criteria.WithoutFlags = []string{imap.SeenFlag}
+		if Config.Verbose > 1 {
+			log.Println("IMAP", imap.SeenFlag)
+		}
 		ids, err := c.Search(criteria)
 		if err != nil {
 			log.Fatal(err)
@@ -189,6 +196,9 @@ func readImap(c *client.Client, imapName, folder string, newMessages bool) []Mes
 
 	messages := make(chan *imap.Message, nmsg)
 	items := []imap.FetchItem{section.FetchItem(), imap.FetchFlags, imap.FetchEnvelope}
+	if Config.Verbose > 1 {
+		log.Println("IMAP", items)
+	}
 	// TODO: use goroutine until this issue will be solved
 	// https://github.com/emersion/go-imap/issues/382
 	done := make(chan error, 1)
@@ -230,6 +240,9 @@ func readImap(c *client.Client, imapName, folder string, newMessages bool) []Mes
 		} else {
 			if newMessages {
 				m.Flags = append(m.Flags, imap.RecentFlag)
+				if Config.Verbose > 1 {
+					log.Println("IMAP", imap.RecentFlag)
+				}
 			}
 			if !isMailWritten(m) {
 				wg.Add(1)
@@ -571,6 +584,9 @@ func MoveMessage(c *client.Client, imapName string, msg Message, folderName stri
 		// mark mail as seen in our inbox
 		item := imap.FormatFlagsOp(imap.AddFlags, true)
 		flags := []interface{}{imap.SeenFlag}
+		if Config.Verbose > 1 {
+			log.Println("IMAP", imap.SeenFlag)
+		}
 		if err := c.Store(seqset, item, flags, nil); err != nil {
 			log.Fatal(err)
 		}
@@ -581,6 +597,9 @@ func MoveMessage(c *client.Client, imapName string, msg Message, folderName stri
 	// mark mail as deleted on IMAP server
 	item := imap.FormatFlagsOp(imap.AddFlags, true)
 	flags := []interface{}{imap.DeletedFlag}
+	if Config.Verbose > 1 {
+		log.Println("IMAP", imap.DeletedFlag)
+	}
 	if err := c.Store(seqset, item, flags, nil); err != nil {
 		log.Fatal(err)
 	}
@@ -625,6 +644,9 @@ func Move(c *client.Client, imapName, match, folderName string) {
 
 	messages := make(chan *imap.Message, to)
 	items := []imap.FetchItem{imap.FetchFlags, imap.FetchUid, imap.FetchEnvelope}
+	if Config.Verbose > 1 {
+		log.Println("IMAP", items)
+	}
 	// TODO: use goroutine until this issue will be solved
 	// https://github.com/emersion/go-imap/issues/382
 	done := make(chan error, 1)
@@ -767,6 +789,9 @@ func removeImapMessages(cmap map[string]*client.Client, mlist []Message) {
 		// now we mark messages for deletion in IMAP
 		item := imap.FormatFlagsOp(imap.AddFlags, true)
 		flags := []interface{}{imap.DeletedFlag}
+		if Config.Verbose > 1 {
+			log.Println("Move", imap.DeletedFlag)
+		}
 		if err := c.Store(seqset, item, flags, nil); err != nil {
 			log.Fatal(err)
 		}
