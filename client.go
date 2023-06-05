@@ -20,6 +20,7 @@ import (
 	"net/mail"
 	"net/smtp"
 	"os"
+	"path/filepath"
 	"regexp"
 	"runtime"
 	"strings"
@@ -749,6 +750,7 @@ func Sync(cmap map[string]*client.Client, dryRun bool) {
 	}
 	if !dryRun {
 		removeImapMessages(cmap, dlist)
+		removeLocalMessages(cmap, dlist)
 	}
 }
 
@@ -802,6 +804,58 @@ func removeImapMessages(cmap map[string]*client.Client, mlist []Message) {
 		// delete messages in local maildir DB
 		for _, hid := range hlist {
 			deleteMessage(hid)
+		}
+	}
+}
+
+// helper function to remove messages in local folder
+func removeLocalMessages(cmap map[string]*client.Client, mlist []Message) {
+	defer timing("removeLocalMessages", time.Now())
+	defer profiler("removeLocalMessages")()
+
+	if Config.Verbose > 0 {
+		log.Println("removeLocalMessages", mlist)
+	}
+	for imapName, c := range cmap {
+		// select messages from IMAP inbox folder
+		inboxFolder := imapFolder(imapName, "inbox")
+		_, err := c.Select(inboxFolder, false)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		// get list of message ids for our IMAP server
+		var hlist []string
+		for _, m := range mlist {
+			if m.Imap == imapName {
+				log.Println("### hid number to delete", m.HashId)
+				hlist = append(hlist, m.HashId)
+			}
+		}
+		// delete messages in local maildir DB
+		for _, hid := range hlist {
+			// location of user inbox, either Maildir/Inbox/new or
+			// Maildir/<username>/INBOX/new
+			fpath := localFolder(imapName, inboxFolder)
+			fdir := fmt.Sprintf("%s/%s/new", Config.Maildir, fpath)
+			idir := fmt.Sprintf("%s/Inbox/new", Config.Maildir)
+			inboxDirs := []string{fdir, idir}
+			fpat := fmt.Sprintf("%s.%s", hid, hostname)
+			for _, dir := range inboxDirs {
+				if files, err := os.ReadDir(dir); err == nil {
+					for _, f := range files {
+						if strings.HasSuffix(f.Name(), fpat) {
+							fname := filepath.Join(fdir, f.Name())
+							if _, err := os.Stat("/path/to/whatever"); err == nil {
+								log.Printf("### DELETE local file %s", fname)
+								if err := os.Remove(fname); err != nil {
+									log.Printf("ERROR: unable to delete %s, error %v", fname, err)
+								}
+							}
+						}
+					}
+				}
+			}
 		}
 	}
 }
@@ -888,7 +942,6 @@ func main() {
 	}
 
 	ParseConfig(config)
-	log.SetFlags(log.LstdFlags)
 	// overwrite verbose level in config
 	if verbose > 0 {
 		Config.Verbose = verbose
