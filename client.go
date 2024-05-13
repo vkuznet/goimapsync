@@ -165,7 +165,7 @@ func readImap(c *imapclient.Client, imapName, folder string, newMessages bool) [
 	}
 
 	// get messages
-	seqset := new(imap.SeqSet)
+	seqset := imap.SeqSet{}
 	var nmsg uint32
 	if newMessages {
 		// get only new messages
@@ -194,17 +194,11 @@ func readImap(c *imapclient.Client, imapName, folder string, newMessages bool) [
 		seqset.AddRange(from, to)
 		nmsg = to
 	}
-	// section will be used only in writeContent
-	//     section := &imap.BodySectionName{}
-
 	fetchOptions := &imap.FetchOptions{
-		Envelope: true,
-		UID:      true,
-		Flags:    true,
-		//         BodySection: []*imap.FetchItemBodySection{{}},
-		BodySection: []*imap.FetchItemBodySection{
-			{Specifier: imap.PartSpecifierHeader},
-		},
+		Envelope:    true,
+		UID:         true,
+		Flags:       true,
+		BodySection: []*imap.FetchItemBodySection{{}},
 	}
 	messages, err := c.Fetch(seqset, fetchOptions).Collect()
 
