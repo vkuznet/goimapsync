@@ -27,8 +27,8 @@ import (
 	"sync"
 	"time"
 
-	imap "github.com/emersion/go-imap"
-	"github.com/emersion/go-imap/client"
+	"github.com/emersion/go-imap/v2"
+	"github.com/emersion/go-imap/v2/imapclient"
 )
 
 // global variable to keep pointer to mdb
@@ -50,24 +50,25 @@ var hostname string
 
 // Message structure holds all information about emails message
 type Message struct {
-	Path      string   // location of the message in local file dir
-	MessageId string   // message Id
-	Flags     []string // message Flags
-	Imap      string   // name of imap server it belongs to
-	Subject   string   // message subject
-	SeqNumber uint32   // message sequence number
-	HashId    string   // message id md5 hash
+	Path      string      // location of the message in local file dir
+	MessageID string      // message Id
+	Flags     []imap.Flag // message flags
+	//     Flags     []string // message Flags
+	Imap      string // name of imap server it belongs to
+	Subject   string // message subject
+	SeqNumber uint32 // message sequence number
+	HashID    string // message id md5 hash
 }
 
 // String function dumps Message info
 func (m *Message) String() string {
-	return fmt.Sprintf("<Imap:%s SeqNum:%v HashId:%v Path:%s MessageId:%s Flags:%v Subject: %s>", m.Imap, m.SeqNumber, m.HashId, m.Path, m.MessageId, m.Flags, m.Subject)
+	return fmt.Sprintf("<Imap:%s SeqNum:%v HashID:%v Path:%s MessageID:%s Flags:%v Subject: %s>", m.Imap, m.SeqNumber, m.HashID, m.Path, m.MessageID, m.Flags, m.Subject)
 }
 
 // ServerClient structure which holds IMAP server alias name and connection pointer
 type ServerClient struct {
-	Name   string         // name of IMAP server
-	Client *client.Client // connected client to IMAP server
+	Name   string             // name of IMAP server
+	Client *imapclient.Client // connected client to IMAP server
 }
 
 // helper function which extracts flags from given email file name
@@ -83,7 +84,7 @@ func getFlags(fname string) []string {
 }
 
 // helper function which extracts message id from given email file
-func getMessageId(fname string) string {
+func getMessageID(fname string) string {
 	file, err := os.Open(fname)
 	if err != nil {
 		log.Fatal(err)
@@ -104,26 +105,26 @@ func getMessageId(fname string) string {
 }
 
 // helper function to connect to our IMAP servers
-func connect() map[string]*client.Client {
+func connect() map[string]*imapclient.Client {
 	defer timing("connect", time.Now())
 	defer profiler("connect")()
-	cmap := make(map[string]*client.Client)
+	cmap := make(map[string]*imapclient.Client)
 
 	ch := make(chan ServerClient, len(Config.Servers))
 	defer close(ch)
 	for _, srv := range Config.Servers {
 		go func(s Server) {
-			var c *client.Client
+			var c *imapclient.Client
 			var err error
 			if s.UseTls {
-				c, err = client.DialTLS(s.Uri, nil)
+				c, err = imapclient.DialTLS(s.Uri, nil)
 			} else {
-				c, err = client.Dial(s.Uri)
+				c, err = imapclient.DialInsecure(s.Uri, nil)
 			}
 			if err != nil {
 				log.Fatal(err)
 			}
-			if err := c.Login(s.Username, s.Password); err != nil {
+			if err := c.Login(s.Username, s.Password).Wait(); err != nil {
 				log.Fatal(err)
 			}
 			if Config.Verbose > 0 {
@@ -140,7 +141,7 @@ func connect() map[string]*client.Client {
 }
 
 // helper function to logout from all IMAP clients
-func logout(cmap map[string]*client.Client) {
+func logout(cmap map[string]*imapclient.Client) {
 	for _, c := range cmap {
 		c.Logout()
 	}
@@ -148,7 +149,7 @@ func logout(cmap map[string]*client.Client) {
 
 // helper function which takes a snapshot of remote IMAP servers
 // and return list of messages
-func readImap(c *client.Client, imapName, folder string, newMessages bool) []Message {
+func readImap(c *imapclient.Client, imapName, folder string, newMessages bool) []Message {
 	defer timing("readImap", time.Now())
 	defer profiler("readImap")()
 
@@ -157,7 +158,7 @@ func readImap(c *client.Client, imapName, folder string, newMessages bool) []Mes
 	}
 
 	// Select given imap folder
-	mbox, err := c.Select(folder, false)
+	mbox, err := c.Select(folder, nil).Wait()
 	if err != nil {
 		log.Printf("Folder '%s' on '%s', error: %v\n", folder, imapName, err)
 		return []Message{}
@@ -168,15 +169,16 @@ func readImap(c *client.Client, imapName, folder string, newMessages bool) []Mes
 	var nmsg uint32
 	if newMessages {
 		// get only new messages
-		criteria := imap.NewSearchCriteria()
-		criteria.WithoutFlags = []string{imap.SeenFlag}
+		criteria := &imap.SearchCriteria{}
+		criteria.NotFlag = []imap.Flag{imap.FlagSeen}
 		if Config.Verbose > 1 {
-			log.Println("IMAP", imap.SeenFlag)
+			log.Println("IMAP", imap.FlagSeen)
 		}
-		ids, err := c.Search(criteria)
+		data, err := c.Search(criteria, nil).Wait()
 		if err != nil {
 			log.Fatal(err)
 		}
+		ids := data.AllSeqNums()
 		if len(ids) > 0 {
 			seqset.AddNum(ids...)
 			nmsg = uint32(len(ids))
@@ -188,71 +190,69 @@ func readImap(c *client.Client, imapName, folder string, newMessages bool) []Mes
 	} else {
 		// get all messages from mailbox
 		from := uint32(1)
-		to := mbox.Messages
+		to := mbox.NumMessages
 		seqset.AddRange(from, to)
 		nmsg = to
 	}
 	// section will be used only in writeContent
-	section := &imap.BodySectionName{}
+	//     section := &imap.BodySectionName{}
 
-	messages := make(chan *imap.Message, nmsg)
-	items := []imap.FetchItem{section.FetchItem(), imap.FetchFlags, imap.FetchEnvelope}
-	if Config.Verbose > 1 {
-		log.Println("IMAP", items)
+	fetchOptions := &imap.FetchOptions{
+		Envelope: true,
+		UID:      true,
+		Flags:    true,
+		//         BodySection: []*imap.FetchItemBodySection{{}},
+		BodySection: []*imap.FetchItemBodySection{
+			{Specifier: imap.PartSpecifierHeader},
+		},
 	}
-	// TODO: use goroutine until this issue will be solved
-	// https://github.com/emersion/go-imap/issues/382
-	done := make(chan error, 1)
-	go func() {
-		done <- c.Fetch(seqset, items, messages)
-	}()
-	//     err = c.Fetch(seqset, items, messages)
-	//     if err != nil {
-	//         log.Fatal(err)
-	//     }
+	messages, err := c.Fetch(seqset, fetchOptions).Collect()
 
 	seqNum := uint32(1)
 	var msgs []Message
 	var wg sync.WaitGroup
-	for msg := range messages {
+	for _, msg := range messages {
 		var m Message
 		if msg == nil || msg.Envelope == nil {
 			continue
 		}
-		mid := msg.Envelope.MessageId
+		mid := msg.Envelope.MessageID
 		sub := msg.Envelope.Subject
 		hid := md5hash(mid)
 		flags := msg.Flags
-		m = Message{MessageId: mid, Flags: flags, Imap: imapName, Subject: sub, SeqNumber: seqNum, HashId: hid}
+		m = Message{MessageID: mid, Flags: flags, Imap: imapName, Subject: sub, SeqNumber: seqNum, HashID: hid}
 		if mid == "" || hid == "" {
 			log.Printf("read empty mail %s %v out of %v from %s\n", m.String(), seqNum, nmsg, imapName)
 			continue
 		}
 		log.Printf("read %s %v out of %v from %s\n", m.String(), seqNum, nmsg, imapName)
-		r := msg.GetBody(section)
 		entry, e := findMessage(hid)
 		if Config.Verbose > 1 {
 			log.Println("hid", hid, "DB entry", entry.String(), e)
 		}
-		if e == nil && entry.HashId == hid {
+		if e == nil && entry.HashID == hid {
 			if Config.Verbose > 0 {
 				log.Println("Mail with hash", hid, "already exists")
 			}
 		} else {
 			if newMessages {
-				m.Flags = append(m.Flags, imap.RecentFlag)
+				//                 m.Flags = append(m.Flags, imap.RecentFlag)
+				//                 if Config.Verbose > 1 {
+				//                     log.Println("IMAP", imap.RecentFlag)
+				//                 }
+				m.Flags = append(m.Flags, imap.FlagSeen)
 				if Config.Verbose > 1 {
-					log.Println("IMAP", imap.RecentFlag)
+					log.Println("IMAP", imap.FlagSeen)
 				}
 			}
 			if !isMailWritten(m) {
 				wg.Add(1)
-				go writeMail(imapName, folder, m, r, &wg)
+				go writeMail(imapName, folder, m, msg, &wg)
 			} else {
 				// check if mail is presented in our DB, if not we should insert its entry
-				msg, e := findMessage(m.HashId)
-				if e == nil && msg.HashId == "" {
-					m.Path = findPath(m.Imap, m.HashId)
+				msg, e := findMessage(m.HashID)
+				if e == nil && msg.HashID == "" {
+					m.Path = findPath(m.Imap, m.HashID)
 					insertMessage(m)
 				}
 			}
@@ -293,7 +293,7 @@ func isMailWritten(m Message) bool {
 		}
 	}
 	for hid := range mdict {
-		if hid == m.HashId {
+		if hid == m.HashID {
 			return true
 		}
 	}
@@ -354,9 +354,10 @@ func localFolder(imapName, folder string) string {
 }
 
 // helper function to return short flag names
-func flagSymbols(flags []string) string {
+func flagSymbols(flags []imap.Flag) string {
 	var flag string
-	for _, f := range flags {
+	for _, iflag := range flags {
+		f := string(iflag)
 		f = strings.ToLower(strings.Replace(f, "\\", "", -1))
 		if f == "seen" {
 			f = "S"
@@ -378,12 +379,16 @@ func flagSymbols(flags []string) string {
 }
 
 // helper function to write emails in imapName folder of local maildir
-func writeMail(imapName, folder string, m Message, r io.Reader, wg *sync.WaitGroup) {
-	hid := m.HashId  // hash id of the message id
+// func writeMail(imapName, folder string, m Message, r io.Reader, wg *sync.WaitGroup) {
+func writeMail(imapName, folder string, m Message, msgBuffer *imapclient.FetchMessageBuffer, wg *sync.WaitGroup) {
+	hid := m.HashID  // hash id of the message id
 	flags := m.Flags // message flags
 	defer timing("writeMail", time.Now())
 	defer profiler("writeMail")()
 	defer wg.Done()
+
+	// TODO:
+	var r io.Reader
 
 	// construct file name with the following format:
 	// tstamp.hid.hostname:2,flags
@@ -514,21 +519,16 @@ func sendEmail(recepient string, headers mail.Header, body []byte) {
 }
 
 // helper function to get list of all imap folders
-func getImapFolders(c *client.Client, imapName string) []string {
-	// List mailboxes
-	mailboxes := make(chan *imap.MailboxInfo, 10)
-	done := make(chan error, 1)
-	go func() {
-		done <- c.List("", "*", mailboxes)
-	}()
-
+func getImapFolders(c *imapclient.Client, imapName string) []string {
 	var folders []string
-	for m := range mailboxes {
-		folders = append(folders, m.Name)
+	mailboxes, err := c.List("", "%", nil).Collect()
+	//     mailboxes, err := c.List("", "*", nil).Collect()
+	if err != nil {
+		log.Fatalf("failed to list mailboxes: %v", err)
 	}
-
-	if err := <-done; err != nil {
-		log.Fatal(err)
+	log.Printf("Found %v mailboxes", len(mailboxes))
+	for _, mbox := range mailboxes {
+		folders = append(folders, mbox.Mailbox)
 	}
 	return folders
 }
@@ -558,7 +558,7 @@ func imapFolder(imapName, folder string) string {
 }
 
 // MoveMessage moves message in given imap server into specifc folder
-func MoveMessage(c *client.Client, imapName string, msg Message, folderName string) {
+func MoveMessage(c *imapclient.Client, imapName string, msg Message, folderName string) {
 	defer timing("MoveMessage", time.Now())
 	defer profiler("MoveMessage")()
 	// inbox folder
@@ -569,7 +569,7 @@ func MoveMessage(c *client.Client, imapName string, msg Message, folderName stri
 	seqset.AddNum(msg.SeqNumber)
 
 	// connect to given Spam folder
-	_, err := c.Select(inboxFolder, false)
+	_, err := c.Select(inboxFolder, nil).Wait()
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -577,18 +577,23 @@ func MoveMessage(c *client.Client, imapName string, msg Message, folderName stri
 	if folder == "" {
 		log.Printf("delete %v\n", msg.String())
 	} else {
-		log.Printf("move %v to '%s' on %s\n", msg.MessageId, folder, imapName)
+		log.Printf("move %v to '%s' on %s\n", msg.MessageID, folder, imapName)
 	}
 
 	// copy mail to folder
 	if folder != "" {
 		// mark mail as seen in our inbox
-		item := imap.FormatFlagsOp(imap.AddFlags, true)
-		flags := []interface{}{imap.SeenFlag}
+		//         item := imap.FormatFlagsOp(imap.AddFlags, true)
+		//         flags := []interface{}{imap.FlagSeen}
 		if Config.Verbose > 1 {
-			log.Println("IMAP", imap.SeenFlag)
+			log.Println("IMAP", imap.FlagSeen)
 		}
-		if err := c.Store(seqset, item, flags, nil); err != nil {
+		storeFlags := imap.StoreFlags{
+			Op:     imap.StoreFlagsAdd,
+			Flags:  []imap.Flag{imap.FlagSeen},
+			Silent: true,
+		}
+		if err := c.Store(seqset, &storeFlags, nil).Close(); err != nil {
 			log.Fatal(err)
 		}
 		if err := c.Copy(seqset, folder); err != nil {
@@ -596,23 +601,28 @@ func MoveMessage(c *client.Client, imapName string, msg Message, folderName stri
 		}
 	}
 	// mark mail as deleted on IMAP server
-	item := imap.FormatFlagsOp(imap.AddFlags, true)
-	flags := []interface{}{imap.DeletedFlag}
+	//     item := imap.FormatFlagsOp(imap.AddFlags, true)
+	//     flags := []interface{}{imap.DeletedFlag}
 	if Config.Verbose > 1 {
-		log.Println("IMAP", imap.DeletedFlag)
+		log.Println("IMAP", imap.FlagDeleted)
 	}
-	if err := c.Store(seqset, item, flags, nil); err != nil {
+	storeFlags := imap.StoreFlags{
+		Op:     imap.StoreFlagsAdd,
+		Flags:  []imap.Flag{imap.FlagDeleted},
+		Silent: true,
+	}
+	if err := c.Store(seqset, &storeFlags, nil).Close(); err != nil {
 		log.Fatal(err)
 	}
 	// then delete it in inbox folder
-	if err := c.Expunge(nil); err != nil {
+	if err := c.Expunge().Close(); err != nil {
 		log.Fatal(err)
 	}
 }
 
 // Move message on IMAP to a given folder, if folder name is not given the mail
 // will be deleted
-func Move(c *client.Client, imapName, match, folderName string) {
+func Move(c *imapclient.Client, imapName, match, folderName string) {
 	if folderName == "" || match == "" {
 		log.Fatal("Move operation requires both folder and message id")
 	}
@@ -625,54 +635,40 @@ func Move(c *client.Client, imapName, match, folderName string) {
 	// check if given match is existing file, if so we'll
 	// extract from it MatchedId
 	if _, err := os.Stat(match); err == nil {
-		match = getMessageId(match)
+		match = getMessageID(match)
 	}
 
 	// Select INBOX
-	mbox, err := c.Select(inboxFolder, false)
+	mbox, err := c.Select(inboxFolder, nil).Wait()
 	if err != nil {
 		log.Fatal(err)
 	}
 
 	// Get messages from INBOX
 	from := uint32(1)
-	to := mbox.Messages
+	to := mbox.NumMessages
 	seqset := new(imap.SeqSet)
 	seqset.AddRange(from, to)
 	if Config.Verbose > 0 {
 		log.Println("Fetch from IMAP", imapName, folderName, from, to)
 	}
 
-	messages := make(chan *imap.Message, to)
-	items := []imap.FetchItem{imap.FetchFlags, imap.FetchUid, imap.FetchEnvelope}
-	if Config.Verbose > 1 {
-		log.Println("IMAP", items)
-	}
-	// TODO: use goroutine until this issue will be solved
-	// https://github.com/emersion/go-imap/issues/382
-	done := make(chan error, 1)
-	go func() {
-		done <- c.Fetch(seqset, items, messages)
-	}()
-	//     err = c.Fetch(seqset, items, messages)
-	//     if err != nil {
-	//         log.Fatal(err)
-	//     }
-
+	fetchOptions := &imap.FetchOptions{Envelope: true, UID: true, Flags: true}
+	messages, err := c.Fetch(seqset, fetchOptions).Collect()
 	seqNum := uint32(1)
-	for msg := range messages {
+	for _, msg := range messages {
 		if Config.Verbose > 1 {
-			log.Println("* "+msg.Envelope.Subject+" MessageId ", msg.Envelope.MessageId)
+			log.Println("* "+msg.Envelope.Subject+" MessageID ", msg.Envelope.MessageID)
 		}
-		if msg.Envelope.MessageId == match {
+		if msg.Envelope.MessageID == match {
 			if Config.Verbose > 0 {
 				log.Printf("Found match: seq:%v Envelope: %+v Flags: %+v\n", seqNum, msg.Envelope, msg.Flags)
 			}
-			mid := msg.Envelope.MessageId
+			mid := msg.Envelope.MessageID
 			hid := md5hash(mid)
 			sub := msg.Envelope.Subject
 			flags := msg.Flags
-			m := Message{HashId: hid, MessageId: mid, Flags: flags, Imap: imapName, Subject: sub, SeqNumber: seqNum}
+			m := Message{HashID: hid, MessageID: mid, Flags: flags, Imap: imapName, Subject: sub, SeqNumber: seqNum}
 			MoveMessage(c, imapName, m, folder)
 			return
 		}
@@ -680,8 +676,24 @@ func Move(c *client.Client, imapName, match, folderName string) {
 	}
 }
 
+func ListFolders(c *imapclient.Client, imapName string) {
+	defer timing("ListFolders", time.Now())
+	defer profiler("ListFolders")()
+	log.Printf("ListFolders from %s\n", imapName)
+
+	// list folders from IMAP server
+	mailboxes, err := c.List("", "%", nil).Collect()
+	if err != nil {
+		log.Fatalf("failed to list mailboxes: %v", err)
+	}
+	log.Printf("Found %v mailboxes", len(mailboxes))
+	for _, mbox := range mailboxes {
+		log.Printf(" - %v", mbox.Mailbox)
+	}
+}
+
 // Fetch content of given folder from IMAP into local maildir
-func Fetch(c *client.Client, imapName, folder string, newMessages bool) {
+func Fetch(c *imapclient.Client, imapName, folder string, newMessages bool) {
 	defer timing("Fetch", time.Now())
 	defer profiler("Fetch")()
 	log.Printf("Fetch %s from %s\n", folder, imapName)
@@ -693,7 +705,7 @@ func Fetch(c *client.Client, imapName, folder string, newMessages bool) {
 }
 
 // Sync provides sync between local maildir and IMAP servers
-func Sync(cmap map[string]*client.Client, dryRun bool) {
+func Sync(cmap map[string]*imapclient.Client, dryRun bool) {
 	defer timing("Sync", time.Now())
 	defer profiler("Sync")()
 
@@ -735,10 +747,10 @@ func Sync(cmap map[string]*client.Client, dryRun bool) {
 	var dlist []Message
 	for _, msg := range mlist {
 		// check if our message exists in DB
-		m, e := findMessage(msg.HashId)
-		if e == nil && m.HashId == msg.HashId {
+		m, e := findMessage(msg.HashID)
+		if e == nil && m.HashID == msg.HashID {
 			// we found message in DB, check if it exists in local maildir
-			if _, ok := mdict[m.HashId]; !ok {
+			if _, ok := mdict[m.HashID]; !ok {
 				// message is not found in local maildir and we need to delete it
 				if dryRun {
 					log.Println("dry-run expunge", msg.String())
@@ -756,7 +768,7 @@ func Sync(cmap map[string]*client.Client, dryRun bool) {
 
 // helper function to remove messages in IMAP server(s)
 // it takes list of messages
-func removeImapMessages(cmap map[string]*client.Client, mlist []Message) {
+func removeImapMessages(cmap map[string]*imapclient.Client, mlist []Message) {
 	defer timing("removeImapMessages", time.Now())
 	defer profiler("removeImapMessages")()
 
@@ -766,7 +778,7 @@ func removeImapMessages(cmap map[string]*client.Client, mlist []Message) {
 	for imapName, c := range cmap {
 		// select messages from IMAP inbox folder
 		inboxFolder := imapFolder(imapName, "inbox")
-		_, err := c.Select(inboxFolder, false)
+		_, err := c.Select(inboxFolder, nil).Wait()
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -777,7 +789,7 @@ func removeImapMessages(cmap map[string]*client.Client, mlist []Message) {
 		for _, m := range mlist {
 			if m.Imap == imapName {
 				slist = append(slist, m.SeqNumber)
-				hlist = append(hlist, m.HashId)
+				hlist = append(hlist, m.HashID)
 			}
 		}
 		seqset := new(imap.SeqSet)
@@ -785,20 +797,21 @@ func removeImapMessages(cmap map[string]*client.Client, mlist []Message) {
 		if Config.Verbose > 0 {
 			log.Printf("%s, remove seqset: %v\n", imapName, seqset)
 		}
-		if seqset.Empty() {
+		nums, _ := seqset.Nums()
+		if len(nums) == 0 {
 			continue
 		}
 		// now we mark messages for deletion in IMAP
-		item := imap.FormatFlagsOp(imap.AddFlags, true)
-		flags := []interface{}{imap.DeletedFlag}
-		if Config.Verbose > 1 {
-			log.Println("Move", imap.DeletedFlag)
+		storeFlags := imap.StoreFlags{
+			Op:     imap.StoreFlagsAdd,
+			Flags:  []imap.Flag{imap.FlagDeleted},
+			Silent: true,
 		}
-		if err := c.Store(seqset, item, flags, nil); err != nil {
+		if err := c.Store(seqset, &storeFlags, nil).Close(); err != nil {
 			log.Fatal(err)
 		}
 		// delete messages on IMAP server
-		if err := c.Expunge(nil); err != nil {
+		if err := c.Expunge().Close(); err != nil {
 			log.Fatal(err)
 		}
 		// delete messages in local maildir DB
@@ -809,7 +822,7 @@ func removeImapMessages(cmap map[string]*client.Client, mlist []Message) {
 }
 
 // helper function to remove messages in local folder
-func removeLocalMessages(cmap map[string]*client.Client, mlist []Message) {
+func removeLocalMessages(cmap map[string]*imapclient.Client, mlist []Message) {
 	defer timing("removeLocalMessages", time.Now())
 	defer profiler("removeLocalMessages")()
 
@@ -819,7 +832,7 @@ func removeLocalMessages(cmap map[string]*client.Client, mlist []Message) {
 	for imapName, c := range cmap {
 		// select messages from IMAP inbox folder
 		inboxFolder := imapFolder(imapName, "inbox")
-		_, err := c.Select(inboxFolder, false)
+		_, err := c.Select(inboxFolder, nil).Wait()
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -828,18 +841,25 @@ func removeLocalMessages(cmap map[string]*client.Client, mlist []Message) {
 		var hlist []string
 		for _, m := range mlist {
 			if m.Imap == imapName {
-				log.Println("### hid number to delete", m.HashId)
-				hlist = append(hlist, m.HashId)
+				log.Println("### hid number to delete", m.HashID)
+				hlist = append(hlist, m.HashID)
 			}
 		}
 		// delete messages in local maildir DB
 		for _, hid := range hlist {
 			// location of user inbox, either Maildir/Inbox/new or
-			// Maildir/<username>/INBOX/new
+			// Maildir/<username>/INBOX/new and similar to cur sub-dir
+			var inboxDirs []string
 			fpath := localFolder(imapName, inboxFolder)
 			fdir := fmt.Sprintf("%s/%s/new", Config.Maildir, fpath)
-			idir := fmt.Sprintf("%s/Inbox/new", Config.Maildir)
-			inboxDirs := []string{fdir, idir}
+			inboxDirs = append(inboxDirs, fdir)
+			fdir = fmt.Sprintf("%s/Inbox/new", Config.Maildir)
+			inboxDirs = append(inboxDirs, fdir)
+			fdir = fmt.Sprintf("%s/%s/cur", Config.Maildir, fpath)
+			inboxDirs = append(inboxDirs, fdir)
+			fdir = fmt.Sprintf("%s/Inbox/cur", Config.Maildir)
+			inboxDirs = append(inboxDirs, fdir)
+
 			fpat := fmt.Sprintf("%s.%s", hid, hostname)
 			for _, dir := range inboxDirs {
 				if files, err := os.ReadDir(dir); err == nil {
@@ -918,6 +938,7 @@ func main() {
 		fmt.Println("   fetch-all: to get list of all messages from specified IMAP folder")
 		fmt.Println("   move     : to move givem message on IMAP server, e.g. send to Spam")
 		fmt.Println("   sync     : to sync local maildir with IMAP server(s)")
+		fmt.Println("   folders  : list folders from IMAP server(s)")
 		fmt.Println("Examples:")
 		fmt.Println("   # fetch new messages from given IMAP folder")
 		fmt.Println("   goimapsync -config config.json -op=fetch-new -folder=MyFolder")
@@ -931,6 +952,8 @@ func main() {
 		fmt.Println("   gpg -d -o - $HOME/.goimapsync.gpg | goimapsync -config config.json -op=fetch -folder=MyFolder")
 		fmt.Println("   # move given mail id in IMAP server to given folder")
 		fmt.Println("   goimapsync -config config.json -op=move -mid=123 -folder=MyFolder")
+		fmt.Println("   # list folders")
+		fmt.Println("   goimapsync -config config.json -op=folders")
 	}
 	flag.Parse()
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
@@ -998,6 +1021,11 @@ func main() {
 	case "sync":
 		// sync emails between local maildir and IMAP server
 		Sync(cmap, dryRun)
+	case "folders":
+		// list folders from IMAP server
+		for name, c := range cmap {
+			ListFolders(c, name)
+		}
 	default:
 		log.Fatalf("Given operation '%s' is not supported, please use sync, fetch-new, fetch-all\n", op)
 	}

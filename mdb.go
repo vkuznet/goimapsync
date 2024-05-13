@@ -93,7 +93,7 @@ func insertMessage(m Message) error {
 	var stmt string
 	tstmp := time.Now().Unix()
 	stmt = "INSERT INTO messages (timestamp, hid, mid, path, imap) VALUES (?,?,?,?,?)"
-	_, err = tx.Exec(stmt, tstmp, m.HashId, m.MessageId, m.Path, m.Imap)
+	_, err = tx.Exec(stmt, tstmp, m.HashID, m.MessageID, m.Path, m.Imap)
 	if err != nil {
 		log.Printf("unable to execute statement '%s' in DB: %v\n", stmt, err)
 		return tx.Rollback()
@@ -153,7 +153,7 @@ func findMessage(hid string) (Message, error) {
 			log.Printf("unable to scan in DB: %v\n", err)
 			return m, tx.Rollback()
 		}
-		m = Message{HashId: hid, MessageId: mid, Path: path, Imap: imap}
+		m = Message{HashID: hid, MessageID: mid, Path: path, Imap: imap}
 		return m, nil
 	}
 	return m, nil
@@ -183,7 +183,7 @@ func getDBMessages() ([]Message, error) {
 			log.Printf("unable to scan in DB: %v\n", err)
 			return mlist, tx.Rollback()
 		}
-		m := Message{HashId: hid, MessageId: mid, Path: path, Imap: imap}
+		m := Message{HashID: hid, MessageID: mid, Path: path, Imap: imap}
 		mlist = append(mlist, m)
 	}
 	return mlist, nil
