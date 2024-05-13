@@ -9,12 +9,12 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"crypto/md5"
 	"database/sql"
 	"encoding/hex"
 	"flag"
 	"fmt"
-	"io"
 	"io/ioutil"
 	"log"
 	"net/mail"
@@ -387,8 +387,17 @@ func writeMail(imapName, folder string, m Message, msgBuffer *imapclient.FetchMe
 	defer profiler("writeMail")()
 	defer wg.Done()
 
-	// TODO:
-	var r io.Reader
+	// Convert message buffer to io Reader
+	//     log.Printf("Flags: %v", msgBuffer.Flags)
+	//     log.Printf("Subject: %v", msgBuffer.Envelope.Subject)
+	// https://pkg.go.dev/github.com/emersion/go-imap/v2/imapclient#example-Client.Fetch
+	var data []byte
+	for _, buf := range msgBuffer.BodySection {
+		for _, b := range buf {
+			data = append(data, b)
+		}
+	}
+	r := bytes.NewReader(data)
 
 	// construct file name with the following format:
 	// tstamp.hid.hostname:2,flags
