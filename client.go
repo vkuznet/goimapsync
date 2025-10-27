@@ -714,6 +714,9 @@ func Sync(cmap map[string]*imapclient.Client, dryRun bool) {
 
 	var mlist []Message
 	for imapName, c := range cmap {
+		/* original code: before 20241107
+		   // I read new messages which I don't need since we have fetch-new action
+
 		// read new messages from IMAP
 		newMessages := true
 		log.Println("### read new messages on", imapName)
@@ -722,11 +725,12 @@ func Sync(cmap map[string]*imapclient.Client, dryRun bool) {
 				log.Println("Read new message", m.String())
 			}
 		}
+		*/
 		// read all messages from IMAP, since we may miss some of them
 		// in local maildir if those were read on another device(s)
 		// this step will ensure that we get local copies of non-new messages
 		log.Println("### read all messages on", imapName)
-		newMessages = false
+		newMessages := false
 		for _, msg := range readImap(c, imapName, "INBOX", newMessages) {
 			mlist = append(mlist, msg)
 		}
@@ -810,7 +814,7 @@ func removeImapMessages(cmap map[string]*imapclient.Client, mlist []Message) {
 			Flags:  []imap.Flag{imap.FlagDeleted},
 			Silent: true,
 		}
-		if err := c.Store(seqset, &storeFlags, nil).Close(); err != nil {
+		if err := c.Store(*seqset, &storeFlags, nil).Close(); err != nil {
 			log.Fatal(err)
 		}
 		// delete messages on IMAP server
