@@ -569,6 +569,9 @@ func imapFolder(imapName, folder string) string {
 		if strings.ToLower(f) == strings.ToLower(folder) {
 			return f
 		}
+		if strings.HasPrefix(folder, f) {
+			return folder
+		}
 	}
 	// defaults
 	if strings.ToLower(folder) == "inbox" {
