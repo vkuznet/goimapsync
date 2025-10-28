@@ -201,6 +201,9 @@ func readImap(c *imapclient.Client, imapName, folder string, newMessages bool) [
 		BodySection: []*imap.FetchItemBodySection{{}},
 	}
 	messages, err := c.Fetch(seqset, fetchOptions).Collect()
+	if Config.Verbose > 1 {
+		log.Printf("Fetch %d messages, seqset %+v, error %v", len(messages), seqset, err)
+	}
 
 	seqNum := uint32(1)
 	var msgs []Message
@@ -239,14 +242,14 @@ func readImap(c *imapclient.Client, imapName, folder string, newMessages bool) [
 					log.Println("IMAP", imap.FlagSeen)
 				}
 			}
-			if !isMailWritten(m) {
+			if !isMailWritten(m, folder) {
 				wg.Add(1)
 				go writeMail(imapName, folder, m, msg, &wg)
 			} else {
 				// check if mail is presented in our DB, if not we should insert its entry
 				msg, e := findMessage(m.HashID)
 				if e == nil && msg.HashID == "" {
-					m.Path = findPath(m.Imap, m.HashID)
+					m.Path = findPath(m.Imap, m.HashID, folder)
 					insertMessage(m)
 				}
 			}
@@ -261,12 +264,12 @@ func readImap(c *imapclient.Client, imapName, folder string, newMessages bool) [
 }
 
 // helper function to find message path in local maildir
-func findPath(imapName, hid string) string {
+func findPath(imapName, hid, folder string) string {
 	var mdict map[string]string
 	if Config.CommonInbox {
-		mdict = readMaildir("", "INBOX")
+		mdict = readMaildir("", folder)
 	} else {
-		for k, v := range readMaildir(imapName, "INBOX") {
+		for k, v := range readMaildir(imapName, folder) {
 			mdict[k] = v
 		}
 	}
@@ -277,12 +280,12 @@ func findPath(imapName, hid string) string {
 }
 
 // helper function to check if mail was previously written in local maildir
-func isMailWritten(m Message) bool {
+func isMailWritten(m Message, folder string) bool {
 	var mdict map[string]string
 	if Config.CommonInbox {
-		mdict = readMaildir("", "INBOX")
+		mdict = readMaildir("", folder)
 	} else {
-		for k, v := range readMaildir(m.Imap, "INBOX") {
+		for k, v := range readMaildir(m.Imap, folder) {
 			mdict[k] = v
 		}
 	}
@@ -304,14 +307,14 @@ func md5hash(mid string) string {
 // helper function to create maildir map of existing mails
 func readMaildir(imapName, folder string) map[string]string {
 
-	// when writing to local mail dir the folder name should not cotain slashes
-	// replace slash with dot
-	folder = strings.Replace(folder, "/", ".", -1)
 	// create proper dir structure in maildir area
 	var dirs = []string{"cur", "new", "tmp"}
 	fdir := localFolder(imapName, folder)
 	for _, d := range dirs {
 		fpath := fmt.Sprintf("%s/%s/%s", Config.Maildir, fdir, d)
+		if Config.Verbose > 1 {
+			log.Printf("create new directory %s", fpath)
+		}
 		os.MkdirAll(fpath, os.ModePerm)
 	}
 	if Config.Verbose > 0 {
@@ -323,7 +326,7 @@ func readMaildir(imapName, folder string) map[string]string {
 	// each file in maildir has format: <tstamp.hid.hostname:2,flags>
 	for _, d := range dirs {
 		root := fmt.Sprintf("%s/%s/%s", Config.Maildir, fdir, d)
-		files, err := ioutil.ReadDir(root)
+		files, err := os.ReadDir(root)
 		if err != nil {
 			log.Println("Error reading", root, err)
 			continue
@@ -339,9 +342,21 @@ func readMaildir(imapName, folder string) map[string]string {
 
 // helper to get local maildir folder
 func localFolder(imapName, folder string) string {
+	if Config.Verbose > 0 {
+		log.Printf("localFolder: imapName=%s folder=%s", imapName, folder)
+	}
+	// when writing to local mail dir the folder name should not cotain slashes
+	// replace slash with dot
+	folder = strings.ReplaceAll(folder, "/", ".")
+	if Config.Verbose > 0 {
+		log.Printf("localFolder: imapName=%s replaced folder=%s", imapName, folder)
+	}
 	if imapName == "" {
 		return folder
 	} else if strings.ToLower(folder) == "inbox" && Config.CommonInbox {
+		return folder
+	}
+	if Config.CommonInbox {
 		return folder
 	}
 	return fmt.Sprintf("%s/%s", imapName, folder)
@@ -385,11 +400,18 @@ func writeMail(imapName, folder string, m Message, msgBuffer *imapclient.FetchMe
 	//     log.Printf("Flags: %v", msgBuffer.Flags)
 	//     log.Printf("Subject: %v", msgBuffer.Envelope.Subject)
 	// https://pkg.go.dev/github.com/emersion/go-imap/v2/imapclient#example-Client.Fetch
-	var data []byte
-	for _, buf := range msgBuffer.BodySection {
-		for _, b := range buf {
-			data = append(data, b)
+	/*
+		var data []byte
+		for _, buf := range msgBuffer.BodySection {
+			for _, b := range buf {
+				data = append(data, b)
+			}
 		}
+		r := bytes.NewReader(data)
+	*/
+	var data []byte
+	for _, body := range msgBuffer.BodySection {
+		data = append(data, body.Bytes...)
 	}
 	r := bytes.NewReader(data)
 
@@ -708,7 +730,7 @@ func Fetch(c *imapclient.Client, imapName, folder string, newMessages bool) {
 }
 
 // Sync provides sync between local maildir and IMAP servers
-func Sync(cmap map[string]*imapclient.Client, dryRun bool) {
+func Sync(cmap map[string]*imapclient.Client, folder string, dryRun bool) {
 	defer timing("Sync", time.Now())
 	defer profiler("Sync")()
 
@@ -731,7 +753,7 @@ func Sync(cmap map[string]*imapclient.Client, dryRun bool) {
 		// this step will ensure that we get local copies of non-new messages
 		log.Println("### read all messages on", imapName)
 		newMessages := false
-		for _, msg := range readImap(c, imapName, "INBOX", newMessages) {
+		for _, msg := range readImap(c, imapName, folder, newMessages) {
 			mlist = append(mlist, msg)
 		}
 	}
@@ -740,10 +762,10 @@ func Sync(cmap map[string]*imapclient.Client, dryRun bool) {
 	log.Println("### read local maildir")
 	var mdict map[string]string
 	if Config.CommonInbox {
-		mdict = readMaildir("", "INBOX")
+		mdict = readMaildir("", folder)
 	} else {
 		for name := range cmap {
-			for k, v := range readMaildir(name, "INBOX") {
+			for k, v := range readMaildir(name, folder) {
 				mdict[k] = v
 			}
 		}
@@ -768,14 +790,14 @@ func Sync(cmap map[string]*imapclient.Client, dryRun bool) {
 		}
 	}
 	if !dryRun {
-		removeImapMessages(cmap, dlist)
-		removeLocalMessages(cmap, dlist)
+		removeImapMessages(cmap, folder, dlist)
+		removeLocalMessages(cmap, folder, dlist)
 	}
 }
 
 // helper function to remove messages in IMAP server(s)
 // it takes list of messages
-func removeImapMessages(cmap map[string]*imapclient.Client, mlist []Message) {
+func removeImapMessages(cmap map[string]*imapclient.Client, folder string, mlist []Message) {
 	defer timing("removeImapMessages", time.Now())
 	defer profiler("removeImapMessages")()
 
@@ -783,8 +805,8 @@ func removeImapMessages(cmap map[string]*imapclient.Client, mlist []Message) {
 		log.Println("removeImapMessages", mlist)
 	}
 	for imapName, c := range cmap {
-		// select messages from IMAP inbox folder
-		inboxFolder := imapFolder(imapName, "inbox")
+		// select messages from IMAP folder
+		inboxFolder := imapFolder(imapName, folder)
 		_, err := c.Select(inboxFolder, nil).Wait()
 		if err != nil {
 			log.Fatal(err)
@@ -829,7 +851,7 @@ func removeImapMessages(cmap map[string]*imapclient.Client, mlist []Message) {
 }
 
 // helper function to remove messages in local folder
-func removeLocalMessages(cmap map[string]*imapclient.Client, mlist []Message) {
+func removeLocalMessages(cmap map[string]*imapclient.Client, folder string, mlist []Message) {
 	defer timing("removeLocalMessages", time.Now())
 	defer profiler("removeLocalMessages")()
 
@@ -837,8 +859,8 @@ func removeLocalMessages(cmap map[string]*imapclient.Client, mlist []Message) {
 		log.Println("removeLocalMessages", mlist)
 	}
 	for imapName, c := range cmap {
-		// select messages from IMAP inbox folder
-		inboxFolder := imapFolder(imapName, "inbox")
+		// select messages from IMAP folder
+		inboxFolder := imapFolder(imapName, folder)
 		_, err := c.Select(inboxFolder, nil).Wait()
 		if err != nil {
 			log.Fatal(err)
@@ -855,20 +877,20 @@ func removeLocalMessages(cmap map[string]*imapclient.Client, mlist []Message) {
 		// delete messages in local maildir DB
 		for _, hid := range hlist {
 			// location of user inbox, either Maildir/Inbox/new or
-			// Maildir/<username>/INBOX/new and similar to cur sub-dir
-			var inboxDirs []string
+			// Maildir/<username>/<folder>/new and similar to cur sub-dir
+			var folderDirs []string
 			fpath := localFolder(imapName, inboxFolder)
 			fdir := fmt.Sprintf("%s/%s/new", Config.Maildir, fpath)
-			inboxDirs = append(inboxDirs, fdir)
-			fdir = fmt.Sprintf("%s/Inbox/new", Config.Maildir)
-			inboxDirs = append(inboxDirs, fdir)
+			folderDirs = append(folderDirs, fdir)
+			fdir = fmt.Sprintf("%s/%s/new", Config.Maildir, folder)
+			folderDirs = append(folderDirs, fdir)
 			fdir = fmt.Sprintf("%s/%s/cur", Config.Maildir, fpath)
-			inboxDirs = append(inboxDirs, fdir)
-			fdir = fmt.Sprintf("%s/Inbox/cur", Config.Maildir)
-			inboxDirs = append(inboxDirs, fdir)
+			folderDirs = append(folderDirs, fdir)
+			fdir = fmt.Sprintf("%s/%s/cur", Config.Maildir, folder)
+			folderDirs = append(folderDirs, fdir)
 
 			fpat := fmt.Sprintf("%s.%s", hid, hostname)
-			for _, dir := range inboxDirs {
+			for _, dir := range folderDirs {
 				if files, err := os.ReadDir(dir); err == nil {
 					for _, f := range files {
 						if strings.HasSuffix(f.Name(), fpat) {
@@ -1027,7 +1049,7 @@ func main() {
 		}
 	case "sync":
 		// sync emails between local maildir and IMAP server
-		Sync(cmap, dryRun)
+		Sync(cmap, folder, dryRun)
 	case "folders":
 		// list folders from IMAP server
 		for name, c := range cmap {
